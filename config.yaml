@@ -1,10 +1,9 @@
 # deepChat v1 · 配置
 #
-# 密钥不在这里 -> 放 .env（DEEPSEEK_API_KEY / EMBEDDING_*）
-# 改完重启生效。阶段 0 只有接入层，用得上的项不多。
+# 密钥不在这里 -> 放 .env（只有 DEEPSEEK_API_KEY 是必需的）
+# 改完重启生效。
 
 persona:
-  name: deepChat
   # 角色库目录：每个 .md 就是一个角色，文件名即角色名（后台面板里能新建/切换）
   dir: prompts/personas
   # 老字段，只在第一次迁移时读一次（把这里的内容搬成角色「deepChat」）
@@ -89,7 +88,7 @@ search:
   timeout: 12
 
 # 资料库。dirs 指向的目录要自己建（knowledge/ 已建好），放好资料后跑 run.py index
-# 或 启动.bat 菜单「建立资料索引」。注意：只放「给机器人查的资料」，
+# 或 start.bat 菜单「建立资料索引」。注意：只放「给机器人查的资料」，
 # 项目自己的文档在 docs/，不要混进来，否则机器人会引用开发文档回话。
 kb:
   enabled: true

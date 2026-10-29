@@ -41,7 +41,10 @@ from .wechat.reply_split import clean_for_wechat
 
 logger = logging.getLogger(__name__)
 
-TEXT_TYPES = {"text", "quote", "link", "file", "unknown"}
+# 能进模型的类型。`_TYPE_MAP` 只会产出 text/image/voice/video/emoji/link/call/system，
+# 再加一个兜底的 unknown；quote / file 是早期设计残留（那时文件与引用还没并进 link），
+# 没有任何生产者，留着只会让人误以为这两类被处理过。
+TEXT_TYPES = {"text", "link", "unknown"}
 # 按等级裁轮数：主人上下文更长（更熟），陌生人只留最近几轮。
 # 值是「轮数」，_trim_turns 里乘 2 才是条数（一问一答两条）。
 LEVEL_TURNS = {"owner": 16, "friend": 12, "stranger": 8}
@@ -201,7 +204,7 @@ class Bot:
 
         # 接话打分的阈值（call_score / join_owner / join_friend）是热改项：
         # 面板改完要立刻按新值判，所以每次 apply_config 都重建 GroupEngager。
-        # S4 才在 config.yaml 加 group.engage 段，现在拿不到就落到默认值，先能跑。
+        # config 里没有 group.engage 段时 GroupEngager 自己落到默认值，不影响启动。
         self.engager = GroupEngager(cfg, getattr(self, "people", None), self.talk, self.members)
         self.engager.state = self.state
 
@@ -473,7 +476,7 @@ class Bot:
             self.talk.open(chat_id, str(msg.get("sender") or ""))
         # 文字先落地，再补语音。反过来万一语音卡住，对方会先看到一段空白
         self.sender.send_voice(chat_id, result.get("voice") or [])
-        # 回复也留一行，和 msg 行靠 msg_keys 关联（不回写 msg 行，见 grouplog）
+        # 回复也留一行，和 msg 行靠 msg_keys 关联（不回写 msg 行，见 group_log）
         self._record_key_reply(chat_id, msg, result["reply"], sent, keys)
         # 埋点放在最后：面板要看到的是「这一条真的走完了」的耗时
         self.state.reply_sent(sent)

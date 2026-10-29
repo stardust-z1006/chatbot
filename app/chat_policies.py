@@ -40,7 +40,6 @@ MODE_HINT = {
     "silent": "收下来但不回、不记，日志里留一句",
     "off": "连日志都不记，彻底不管",
 }
-PEOPLE_LIMIT = 500
 # 群里的成员规则：这群里谁说了算
 PEOPLE_MODES = ("", "only", "ignore")
 PEOPLE_LABEL = {"": "所有人都算", "only": "只理这些人", "ignore": "不理这些人"}
@@ -114,13 +113,6 @@ class ChatPrefs:
 
     def persona_for(self, chat_id: str) -> str:
         return str(self.get(chat_id).get("persona") or "")
-
-    def people_rule(self, chat_id: str) -> Dict[str, Any]:
-        item = self.get(chat_id)
-        return {
-            "people_mode": str(item.get("people_mode") or ""),
-            "people": list(item.get("people") or []),
-        }
 
     def allow_sender(self, chat_id: str, sender: str = "", sender_name: str = "") -> bool:
         """群里这个人说的话算不算数。

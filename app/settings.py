@@ -52,20 +52,6 @@ def _read_env_file(path: Path) -> None:
             os.environ[key] = val
 
 
-class Section(dict):
-    """允许 cfg.llm.model 这种点号访问的 dict 包装。"""
-
-    def __getattr__(self, name: str) -> Any:
-        try:
-            value = self[name]
-        except KeyError as exc:
-            raise AttributeError(name) from exc
-        if isinstance(value, dict) and not isinstance(value, Section):
-            value = Section(value)
-            self[name] = value
-        return value
-
-
 class Settings:
     def __init__(
         self,
@@ -101,10 +87,6 @@ class Settings:
                 return None
             node = node[part]
         return copy.deepcopy(node)
-
-    def section(self, name: str) -> Section:
-        value = self._data.get(name) or {}
-        return Section(value) if isinstance(value, dict) else Section()
 
     def rel(self, rel_path: str) -> Path:
         path = Path(rel_path)
@@ -169,16 +151,6 @@ class Settings:
         path = self.rel(self.get("store.dir", "data"))
         path.mkdir(parents=True, exist_ok=True)
         return path
-
-    @property
-    def prompt_dir(self) -> Path:
-        path = self.rel("prompts")
-        path.mkdir(parents=True, exist_ok=True)
-        return path
-
-    @property
-    def db_path(self) -> Path:
-        return self.data_dir / "bot.sqlite3"
 
     # -- 密钥 ---------------------------------------------------------
     @property
@@ -251,7 +223,9 @@ def _read_yaml(path: Path) -> Dict[str, Any]:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         return data if isinstance(data, dict) else {}
     except Exception as exc:
-        print(f"[warn] {path.name} 解析失败，忽略：{exc}")
+        # 走 logger 而不是 print：配置解析失败要出现在 data/bot.log 和面板日志环里，
+        # 否则只有蹲在控制台前的人能看到。
+        logger.warning("%s 解析失败，忽略：%s", path.name, exc)
         return {}
 
 

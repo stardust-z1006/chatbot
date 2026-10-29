@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import Tuple
 
 # 类型 -> 初始重要度（主文档：待办与指令最高、偏好与事实次之、闲聊最低）
 IMPORTANCE: dict[str, int] = {
@@ -169,7 +169,3 @@ def clip_for_store(text: str) -> str:
     if len(t) <= MAX_CHARS:
         return t
     return t[:MAX_CHARS].rstrip() + "……"
-
-
-def batch(texts: List[str]) -> List[Tags]:
-    return [classify(t) for t in texts]

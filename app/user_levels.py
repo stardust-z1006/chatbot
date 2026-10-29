@@ -142,10 +142,6 @@ class UserLevelStore:
         with self._lock:
             return str((self._data.get(str(wxid or "").strip()) or {}).get("alias") or "")
 
-    def note_of(self, wxid: str) -> str:
-        with self._lock:
-            return str((self._data.get(str(wxid or "").strip()) or {}).get("note") or "")
-
     def get(self, wxid: str) -> Dict[str, Any]:
         key = str(wxid or "").strip()
         with self._lock:

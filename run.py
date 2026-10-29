@@ -10,7 +10,7 @@
     .venv\\Scripts\\python.exe run.py web             # 只开后台面板，不接微信
     .venv\\Scripts\\python.exe run.py open            # 浏览器打开后台面板
 
-回归测试在 tests/ 目录：.venv\\Scripts\\python.exe tests\\run_all.py（九个脚本全跑）。
+回归测试在 tests/ 目录：.venv\\Scripts\\python.exe tests\\run_all.py（十个脚本全跑）。
 """
 from __future__ import annotations
 

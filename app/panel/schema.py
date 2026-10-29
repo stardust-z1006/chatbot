@@ -298,7 +298,3 @@ def describe(cfg: Any) -> List[Dict[str, Any]]:
 
 def groups() -> List[str]:
     return list(GROUPS)
-
-
-def count_in(group: str) -> int:
-    return sum(1 for f in FIELDS if f.group == group)

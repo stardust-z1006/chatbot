@@ -205,13 +205,6 @@ class PersonaStore:
         logger.info("默认角色改为：%s", clean)
         return clean
 
-    def bindings(self) -> Dict[str, str]:
-        """已废弃：绑定关系现在只存在 data/chats.json（ChatPrefs）。
-
-        留着这个方法只为兼容老调用方，永远返回空字典——不要在这里另存一份。
-        """
-        return {}
-
     def text_for(self, chat_id: str = "") -> str:
         """默认角色的人设。按会话选角色是 ChatPrefs 的事，这里只管「默认用谁」。"""
         text = self.text(self.default_name)

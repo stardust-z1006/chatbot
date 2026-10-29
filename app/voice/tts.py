@@ -22,10 +22,6 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-class TTSError(RuntimeError):
-    pass
-
-
 class TTS:
     def __init__(
         self,

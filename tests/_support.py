@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """tests 共用脚手架：断言计数 + 分组标题。
 
-九个回归脚本原来各抄了一份 ``check()`` / ``line()``（其中 8 份逐字相同），
+十个回归脚本原来各抄了一份 ``check()`` / ``line()``（其中 8 份逐字相同），
 改一处要改八处，还容易漏。现在只留这一份。
 
 设计上有意不抛异常：一个用例挂了也要把后面的全跑完，一次看到所有失败项，
@@ -46,20 +46,3 @@ def line(title: str = "") -> None:
 def total() -> int:
     """到目前为止记了几条断言（打印汇总用）。"""
     return _TOTAL
-
-
-def summary(ok_text: str = "全部通过") -> int:
-    """收尾：通过就返回 0，有失败就把失败项列出来并返回 1。
-
-    返回值直接给 ``sys.exit(main())`` 用，方便 run_all.py 判断。
-    """
-    print()
-    print("-" * 60)
-    print(f"  断言 {_TOTAL} 项，通过 {_TOTAL - len(FAILS)} 项，失败 {len(FAILS)} 项")
-    if not FAILS:
-        print(f"  {ok_text}")
-        return 0
-    print("  没过的：")
-    for name in FAILS:
-        print(f"    - {name}")
-    return 1

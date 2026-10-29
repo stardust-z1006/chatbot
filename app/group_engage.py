@@ -392,7 +392,7 @@ class GroupEngager:
       3. engage.enabled 假 -> 返回 hit=None 的 legacy 标记（由 Bot 走老逻辑）
       4. 归一化文本，算六项信号，累加得分
       5. 按 call_score / join_owner / join_friend 出 hit
-      6. 记状态（S3 接 MonitorState，S1 只留口子）
+      6. 记状态（落到 MonitorState 的接话计数上，见 _record）
     """
 
     def __init__(self, cfg: Any, people: Any, talk: Any, members: Any) -> None:
@@ -404,7 +404,7 @@ class GroupEngager:
         self.call_score = int(_cfg_get(cfg, "group.engage.call_score", 50))
         self.join_owner = int(_cfg_get(cfg, "group.engage.join_owner", 45))
         self.join_friend = int(_cfg_get(cfg, "group.engage.join_friend", 60))
-        # 状态记录口子：S3 的 Bot 会把 self.state（MonitorState）挂上来。
+        # 状态记录口子：Bot.apply_config 末尾会把 self.state（MonitorState）挂上来。
         self.state: Any = None
 
     def judge(
@@ -516,10 +516,10 @@ class GroupEngager:
         return Verdict(hit, score, level, reasons)
 
     def _record(self, hit: bool, reasons: List[str]) -> None:
-        """记状态的口子。S1 不接 MonitorState，接线的 Bot 会把 self.state 挂上来。
+        """把这次判定交给 MonitorState 的接话计数（面板上的「命中/漏掉/原因分布」）。
 
         这里用 getattr 而不是直接 import MonitorState：engage 是纯函数模块，
-        不该反过来依赖面板层，否则以后把 engage 单独抽出去测还得拖着 control。
+        不该反过来依赖面板层，否则单独拿出去测还得拖着 panel。
         """
         state = getattr(self, "state", None)
         engage = getattr(state, "engage", None) if state is not None else None

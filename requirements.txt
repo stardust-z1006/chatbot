@@ -1,7 +1,7 @@
-# deepChat v1 · 新版依赖（Python 3.13）
+# deepChat v1 · 依赖（Python 3.13）
 #
-# 装法（在 新版\ 目录下，用共享环境）：
-#   ..\.venv\Scripts\python.exe -m pip install -r requirements.txt ^
+# 装法（在项目根目录，虚拟环境已建在 .venv/）：
+#   .venv\Scripts\python.exe -m pip install -r requirements.txt ^
 #       -i https://pypi.tuna.tsinghua.edu.cn/simple
 #
 # 两条不能省的特殊处理（原因见文件末尾）：
@@ -11,11 +11,11 @@
 # ---- 大模型 ----
 openai>=1.40
 
-# ---- 后台面板（新版新增，旧版没有）----
+# ---- 后台面板 ----
 fastapi>=0.110
 uvicorn>=0.29
 
-# ---- 本地向量（新版新增，旧版没有；首次运行会下载模型约 80MB）----
+# ---- 本地向量（首次运行会下载模型约 80MB）----
 fastembed>=0.3
 
 # ---- 配置 / 联网 / 文档解析 ----
@@ -28,7 +28,9 @@ pypdf>=4.0
 # ---- 语音（微信 4.x 只能发 mp3 文件，不是语音气泡）----
 edge-tts>=6.1.9
 
-# ---- 微信接入（收：读本地消息库；发：UIA 驱动界面）----
+# ---- 微信接入依赖（收：读本地消息库；发：UIA 驱动界面）----
+# 这些不是本项目直接 import 的，而是 wechatauto 自己的依赖。它要 --no-deps
+# 单独装（见文末），所以它的依赖必须在这里补齐，否则启动就缺件。
 uiautomation>=2.0.18
 pywin32>=305
 pyperclip>=1.8.2
@@ -51,7 +53,7 @@ winrt-Windows.Globalization
 
 # ============================================================
 # 单独装（不要写进上面这份清单一起 -r）：
-#   ..\.venv\Scripts\python.exe -m pip install --no-deps wechatauto-replica ^
+#   .venv\Scripts\python.exe -m pip install --no-deps wechatauto-replica ^
 #       -i https://pypi.tuna.tsinghua.edu.cn/simple
 #
 # 为什么要 --no-deps：它硬性声明 winsdk>=1.0.0b10，而 winsdk 官方轮子
@@ -59,5 +61,5 @@ winrt-Windows.Globalization
 # 上面的 winrt-* + vendor/winsdk 就是替代方案，两者缺一不可。
 #
 # 装完自检：
-#   ..\.venv\Scripts\python.exe run.py doctor
+#   .venv\Scripts\python.exe run.py doctor
 # ============================================================

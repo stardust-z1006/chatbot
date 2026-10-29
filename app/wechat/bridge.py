@@ -420,9 +420,6 @@ class Bridge:
             pass
         return None
 
-    def nickname(self, username: str) -> str:
-        return self.display_name(username)
-
     def sessions(self, limit: int = 30) -> List[Dict[str, Any]]:
         try:
             return self.db.get_sessions(limit=limit)
