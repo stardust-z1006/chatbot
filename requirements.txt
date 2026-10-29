@@ -1,0 +1,63 @@
+# deepChat v1 · 新版依赖（Python 3.13）
+#
+# 装法（在 新版\ 目录下，用共享环境）：
+#   ..\.venv\Scripts\python.exe -m pip install -r requirements.txt ^
+#       -i https://pypi.tuna.tsinghua.edu.cn/simple
+#
+# 两条不能省的特殊处理（原因见文件末尾）：
+#   1) wechatauto-replica 必须 --no-deps 单独装；
+#   2) Python 3.13 没有可用的 winsdk 轮子，改用 winrt-* + vendor/winsdk 垫片。
+
+# ---- 大模型 ----
+openai>=1.40
+
+# ---- 后台面板（新版新增，旧版没有）----
+fastapi>=0.110
+uvicorn>=0.29
+
+# ---- 本地向量（新版新增，旧版没有；首次运行会下载模型约 80MB）----
+fastembed>=0.3
+
+# ---- 配置 / 联网 / 文档解析 ----
+pyyaml>=6.0
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+pypdf>=4.0
+
+# ---- 语音（微信 4.x 只能发 mp3 文件，不是语音气泡）----
+edge-tts>=6.1.9
+
+# ---- 微信接入（收：读本地消息库；发：UIA 驱动界面）----
+uiautomation>=2.0.18
+pywin32>=305
+pyperclip>=1.8.2
+Pillow>=9.0
+psutil>=5.9
+colorama>=0.4.6
+cryptography>=41.0
+zstandard>=0.19
+pyautogui>=0.9.53
+opencv-python>=4.8
+imageio-ffmpeg>=0.4.9
+
+# ---- Windows OCR：3.13 用 winrt 系列，由 vendor/winsdk 转发成 winsdk.* 名字 ----
+winrt-runtime
+winrt-Windows.Media.Ocr
+winrt-Windows.Graphics.Imaging
+winrt-Windows.Storage
+winrt-Windows.Storage.Streams
+winrt-Windows.Globalization
+
+# ============================================================
+# 单独装（不要写进上面这份清单一起 -r）：
+#   ..\.venv\Scripts\python.exe -m pip install --no-deps wechatauto-replica ^
+#       -i https://pypi.tuna.tsinghua.edu.cn/simple
+#
+# 为什么要 --no-deps：它硬性声明 winsdk>=1.0.0b10，而 winsdk 官方轮子
+# 最高只到 cp312，Python 3.13 装不上（源码编译要 MSVC 和 scikit-build）。
+# 上面的 winrt-* + vendor/winsdk 就是替代方案，两者缺一不可。
+#
+# 装完自检：
+#   ..\.venv\Scripts\python.exe run.py doctor
+# ============================================================

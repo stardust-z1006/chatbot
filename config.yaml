@@ -1,0 +1,140 @@
+# deepChat v1 · 配置
+#
+# 密钥不在这里 -> 放 .env（DEEPSEEK_API_KEY / EMBEDDING_*）
+# 改完重启生效。阶段 0 只有接入层，用得上的项不多。
+
+persona:
+  name: deepChat
+  # 角色库目录：每个 .md 就是一个角色，文件名即角色名（后台面板里能新建/切换）
+  dir: prompts/personas
+  # 老字段，只在第一次迁移时读一次（把这里的内容搬成角色「deepChat」）
+  prompt_file: prompts/persona.md
+
+llm:
+  base_url: https://api.deepseek.com
+  # 官方已把 deepseek-chat 并入 v4 系列，新版直接用 v4-flash
+  model: deepseek-v4-flash
+  temperature: 0.85
+  max_tokens: 1200
+  timeout: 45
+  retries: 2
+  # 一次回复最多几轮工具调用。给多了模型会在「再查一下」里绕圈
+  tool_rounds: 4
+  # 工具结果累计 token 上限。闸门管不到循环里追加的东西，这里单独兜
+  tool_budget: 6000
+
+store:
+  dir: data
+
+wechat:
+  # 空列表 = 监听全部会话
+  listen: []
+  poll_interval: 1.0
+  # 私聊默认回不回（单个会话可以在后台面板里单独设）
+  reply_private: true
+  # 只回这么多分钟内的消息。防止启动时把昨晚的旧消息补答一遍
+  max_age_minutes: 5
+  # 连续发来好几条时，攒这么多秒再合并成一句回，别一条一回
+  merge_window: 1.2
+  # 群里只有被 @ 或命中关键词才回；关掉就会插嘴所有群聊
+  group_at_only: true
+  # 群里不打 @ 直接叫名字也能触发：账号昵称和角色名都认
+  group_keywords: ["deepChat", "deep"]
+  split_reply: true
+  bubble_chars: 40
+  max_bubbles: 3
+  typing_per_char: 0.035
+  # 两条消息之间至少隔几秒，防止一次性刷屏（旧版有，新版沿用）
+  cooldown: 0.5
+  # 重复发送拦截。发送要驱动微信界面，库里判断「这条发出去没有」用的是像素探针，
+  # 会假阴性（说没发出去、其实已经发出去了），于是它自己又粘贴一遍再发一次——
+  # 表现为「一条回复发两遍」。拦的是**同一次发送调用内**的重复点击（库内部的自动
+  # 重试），不是「N 秒内不许发同样的话」：按时间窗拦，会把一条回复切出来的相同
+  # 气泡当成重发吞掉。0 = 关掉这层拦截；数值只限定台账保留时长。
+  send_dedupe_seconds: 10
+
+# 用户等级。等级只存 data/people.json（面板/接口去改），
+# 这里只是「首次部署的种子」：一旦 people.json 给这个 wxid 建了记录，就以记录为准，
+# 保证「改一处、只有一处生效」。
+people:
+  owners: []            # 这几个 wxid（或昵称）按「主人」对待
+  default_level: stranger
+  self_names: []        # 机器人自己的别名（群昵称被改过时手动补），如 ["deepChat", "小深"]
+
+group:
+  # 关键用户：这些人算「熟人」——只影响两件事：群里说的话会被记下来、
+  # 将来可以不等 @ 就接话。想升成「主人」填到 people.owners。
+  # 填 wxid 最稳（昵称会改、会重名）。
+  key_users: []
+  # 关键用户在群里说的话记不记（data/group_log/一天一个文件）
+  log_enabled: true
+  # 记录保留几天，超期的日文件启动时删掉
+  log_days: 30
+  # 群聊接话打分（at 模式专用）。enabled=false 完全退回「只有 @ 或关键词才回」。
+  engage:
+    enabled: true
+    call_score: 50        # 被叫到（@ / 叫名字）的门槛，达到即回
+    join_owner: 45        # 主人主动接话门槛（不 @ 也回），越低越主动
+    join_friend: 60       # 熟人主动接话门槛
+    continuity_window: 90 # 回复成功后多久内算「还在聊」（秒）
+    member_ttl: 600       # 群成员表缓存（秒）
+
+# 联网。web_search / read_url / weather 都看这个开关
+search:
+  enabled: true
+  max_results: 6
+  # 搜到之后再抓几篇正文，0 = 只看摘要（快，但容易只看到标题党）
+  fetch_pages: 2
+  page_chars: 3000
+  timeout: 12
+
+# 资料库。dirs 指向的目录要自己建（knowledge/ 已建好），放好资料后跑 run.py index
+# 或 启动.bat 菜单「建立资料索引」。注意：只放「给机器人查的资料」，
+# 项目自己的文档在 docs/，不要混进来，否则机器人会引用开发文档回话。
+kb:
+  enabled: true
+  dirs: [knowledge]
+  exts: [".md", ".txt", ".pdf", ".docx"]
+  top_k: 4
+
+# 翻微信聊天记录（只读本地库，不驱动界面）
+history:
+  enabled: true
+  days: 7
+
+# 语音。微信 4.x 发不了语音气泡，这里发的是 mp3 文件
+voice:
+  enabled: false        # 默认关；要开再开
+  mode: tool            # tool = 模型想发才发；always = 每条都配
+  voice: zh-CN-XiaoxiaoNeural
+  rate: "+8%"
+  pitch: "+0Hz"
+  max_chars: 60         # speak 工具能念多长
+  max_per_turn: 1
+  tts_max_chars: 220    # 合成时最多念多少字（长文本先截断）
+
+# V1 的记忆口径（容量满了淘汰，不降级）
+memory:
+  capacity: 400
+  # 群聊记忆的单群配额。群记忆和私聊记忆共用一个 capacity，
+  # 不单独限的话一个热闹的群迟早把私聊的记忆挤出去。只在超配额的那个群里淘汰。
+  group_quota: 80
+  top_k: 6
+  min_score: 0.55
+  weight_similarity: 0.7
+  weight_importance: 0.3
+  # 关掉就不注册 remember 工具（自动入库照旧，那条只影响模型主动记）
+  longterm: true
+
+log:
+  level: INFO
+  file: data/bot.log
+  # 发不出消息时改成 true，会把微信接入库的调试细节也写进 bot.log
+  wechat_debug: false
+
+# 后台面板（127.0.0.1:8787）。只监听本机，没有登录，
+# 别把 host 改成 0.0.0.0 —— 面板能改配置、能重建索引。
+monitor:
+  enabled: true
+  host: 127.0.0.1
+  port: 8787

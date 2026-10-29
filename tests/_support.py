@@ -1,0 +1,65 @@
+# -*- coding: utf-8 -*-
+"""tests 共用脚手架：断言计数 + 分组标题。
+
+九个回归脚本原来各抄了一份 ``check()`` / ``line()``（其中 8 份逐字相同），
+改一处要改八处，还容易漏。现在只留这一份。
+
+设计上有意不抛异常：一个用例挂了也要把后面的全跑完，一次看到所有失败项，
+比 pytest 那种「第一处断言就中断」更适合这种手工核对脚本。
+
+用法::
+
+    from _support import FAILS, check, line, total
+    check("存进去能捞出来", hits[0].text == "我喝美式", str(hits))
+    line("3. 淘汰")
+    ...
+    print(f"断言 {total()} 项，失败 {len(FAILS)} 项")
+"""
+from __future__ import annotations
+
+from typing import List
+
+# 失败项名字。测试脚本直接读它汇总，所以必须是模块级共享的同一份列表。
+FAILS: List[str] = []
+
+_TOTAL = 0
+
+
+def check(name: str, ok: bool, detail: str = "") -> None:
+    """记一条断言。不中断执行。"""
+    global _TOTAL
+    _TOTAL += 1
+    print(("  [通过] " if ok else "  [失败] ") + name + ("　" + detail if detail else ""))
+    if not ok:
+        FAILS.append(name)
+
+
+def line(title: str = "") -> None:
+    """打一条分隔线，给一组断言起个标题。"""
+    print()
+    print("-" * 60)
+    if title:
+        print(title)
+        print("-" * 60)
+
+
+def total() -> int:
+    """到目前为止记了几条断言（打印汇总用）。"""
+    return _TOTAL
+
+
+def summary(ok_text: str = "全部通过") -> int:
+    """收尾：通过就返回 0，有失败就把失败项列出来并返回 1。
+
+    返回值直接给 ``sys.exit(main())`` 用，方便 run_all.py 判断。
+    """
+    print()
+    print("-" * 60)
+    print(f"  断言 {_TOTAL} 项，通过 {_TOTAL - len(FAILS)} 项，失败 {len(FAILS)} 项")
+    if not FAILS:
+        print(f"  {ok_text}")
+        return 0
+    print("  没过的：")
+    for name in FAILS:
+        print(f"    - {name}")
+    return 1
