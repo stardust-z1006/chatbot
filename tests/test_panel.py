@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import inspect
 import logging
 import shutil
 import sys
@@ -25,6 +26,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import requests
+from fastapi.testclient import TestClient
 
 from app.bot import Bot
 from app.panel import server as monitor
@@ -449,6 +451,62 @@ def main() -> int:
         logging.getLogger("demo").info("这是演示日志 %s", time.strftime("%H:%M:%S"))
         logs = get("/api/status")["logs"]
         check("日志进了环里", any("这是演示日志" in x["msg"] for x in logs), f"{len(logs)} 条")
+
+        # ---------------------------------------------------------- 14. 凭据与路由形态
+        print("\n14. 面板凭据与路由形态")
+        # 14a. 形态：这一层的路由必须是同步函数。写成 async def 时，sqlite、文件读写、
+        # 向量计算全都跑在事件循环上——点一次「重建索引」，整个面板连 /healthz 都不响应。
+        # 这条断言是防止有人「顺手加个 async」把隔离改回去。
+        probe = monitor.create_app(cfg, None, MonitorState())
+        blocking = [r.path for r in probe.routes
+                    if getattr(r, "endpoint", None)
+                    and (r.path.startswith("/api/") or r.path in ("/", "/healthz"))
+                    and inspect.iscoroutinefunction(r.endpoint)]
+        check("★ 所有面板路由都是同步函数（阻塞活不能挂在事件循环上）",
+              not blocking, f"这些还是 async：{blocking}")
+
+        # 14b. 没配 token 时必须保持免鉴权，否则老部署升级后会被自己锁在门外
+        with TestClient(monitor.create_app(cfg, None, MonitorState())) as client:
+            check("没配 token 时免鉴权（升级不锁门）",
+                  client.get("/api/status").status_code == 200,
+                  str(client.get("/api/status").status_code))
+
+        # 14c. 配了 token：匿名 401、带凭据 200，并且打开一次就种 cookie
+        cfg.set_override("monitor.token", "test-token")
+        try:
+            with TestClient(monitor.create_app(cfg, None, MonitorState())) as client:
+                check("配了 token 之后匿名调接口 401",
+                      client.get("/api/status").status_code == 401,
+                      str(client.get("/api/status").status_code))
+                check("首页也挡住（不然等于告诉别人面板在跑）",
+                      client.get("/").status_code == 401,
+                      str(client.get("/").status_code))
+                check("healthz 放行（存活探针拿不到令牌）",
+                      client.get("/healthz").status_code == 200,
+                      str(client.get("/healthz").status_code))
+                opened = client.get("/?token=test-token")
+                check("带 ?token= 能打开首页", opened.status_code == 200,
+                      str(opened.status_code))
+                check("★ 打开一次就种下 cookie（前端一行代码都不用改）",
+                      client.cookies.get("panel_token") == "test-token",
+                      str(dict(client.cookies)))
+                check("有了 cookie 之后接口自动能通",
+                      client.get("/api/status").status_code == 200,
+                      str(client.get("/api/status").status_code))
+                check("错的 token 仍然 401",
+                      client.get("/api/status",
+                                 headers={"X-Panel-Token": "wrong"}).status_code == 401)
+                # 上一条已经拿到合法 cookie，这里要先清掉才验得准——否则测的是
+                # 「有凭据能写」，而这条断言要验的是「没凭据不能写」。
+                client.cookies.clear()
+                check("★ 匿名写接口被挡住（reset-all 能被同机任何程序调用过）",
+                      client.post("/api/action/reset-all", json={}).status_code == 401,
+                      str(client.post("/api/action/reset-all", json={}).status_code))
+        finally:
+            cfg.clear_override("monitor.token")
+        with TestClient(monitor.create_app(cfg, None, MonitorState())) as client:
+            check("清掉 token 之后恢复免鉴权",
+                  client.get("/api/status").status_code == 200)
     finally:
         monitor.stop(server)
         detach_log_handler(handler)

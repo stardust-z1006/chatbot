@@ -1,14 +1,21 @@
 # -*- coding: utf-8 -*-
 """后台监控的 HTTP 接口。
 
-只监听 127.0.0.1，没有登录：这是本机的运维面板，安全边界就是「能开这台电脑」。
-**千万别把 host 改成 0.0.0.0 暴露到公网**——面板能改配置、能重建索引。
+默认只监听 127.0.0.1。`monitor.token` 填了就整站要凭据（cookie 或 X-Panel-Token），
+留空则保持「本机免鉴权」的老行为——因为这是运维面板，安全边界原本是
+「能开这台电脑」。但只要它离开这个边界（改 host、做端口转发、放到服务器上），
+就必须填 token，否则同机任何程序都能改配置、重建索引、清记忆。
+
+路由一律用同步 `def`，不用 `async def`：这一层做的是 sqlite 查询、文件读写、
+向量计算，全是阻塞调用。写成 async 会卡在事件循环上——点一次「重建索引」，
+整个面板连 /healthz 都不响应。同步函数 FastAPI 会丢进线程池，天然隔离。
 
 和机器人同进程跑（uvicorn 起在后台线程），这样改参数是直接改内存里的
 Settings，不用做进程间通信；面板挂了也不影响收消息（异常都在各自线程里）。
 """
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 import threading
@@ -50,6 +57,53 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
     app.state.bot = bot
     app.state.mon = state
 
+    # ------------------------------------------------------------ 凭据
+    # 面板能改全部参数、能重建索引、能清记忆，所以「只监听 127.0.0.1」不构成
+    # 足够的安全边界：同机任何一个程序（包括浏览器里打的 localhost）都能调。
+    #
+    # 默认 monitor.token 为空 = 保持原来的本机免鉴权行为，不破坏既有部署；
+    # 一旦填了值（或设了 PANEL_TOKEN 环境变量）就整站生效。
+    # 浏览器只要带 `?token=…` 打开一次，之后靠 cookie 记住，页面代码不用改。
+    panel_token = (str(cfg.get("monitor.token", "") or "").strip()
+                   or os.environ.get("PANEL_TOKEN", "").strip())
+    token_cookie = "panel_token"
+
+    def _token_ok(value: str) -> bool:
+        # 用 compare_digest 而不是 ==：字符串比较会在第一个不同的字符处返回，
+        # 时间差可以被用来一位一位猜出令牌。
+        return bool(panel_token) and hmac.compare_digest(str(value or ""), panel_token)
+
+    @app.middleware("http")
+    async def _guard(request: Request, call_next):
+        if not panel_token:
+            return await call_next(request)
+        path = request.url.path
+        # 存活探针不校验：它只回 uptime，且外部监控通常拿不到令牌。
+        if path == "/healthz":
+            return await call_next(request)
+
+        supplied = (request.headers.get("X-Panel-Token")
+                    or request.query_params.get("token")
+                    or request.cookies.get(token_cookie) or "")
+        if _token_ok(supplied):
+            response = await call_next(request)
+            # 第一次用 ?token= 打开时种下 cookie，之后前端的相对路径 fetch 自动带上。
+            if request.query_params.get("token") and not request.cookies.get(token_cookie):
+                response.set_cookie(token_cookie, panel_token, httponly=True,
+                                    samesite="strict", path="/")
+            return response
+
+        if path.startswith("/api/"):
+            return JSONResponse(
+                {"ok": False, "error": "面板凭据不对（monitor.token / PANEL_TOKEN）"},
+                status_code=401,
+            )
+        return HTMLResponse(
+            "<h1>401</h1><p>这个面板要凭据。第一次打开请在地址后面加"
+            " <code>?token=…</code>，浏览器会用 cookie 记住。</p>",
+            status_code=401,
+        )
+
     # ------------------------------------------------------------ 错误统一成 JSON
     @app.exception_handler(schema.FieldError)
     async def _on_field_error(_: Request, exc: schema.FieldError) -> JSONResponse:
@@ -70,16 +124,16 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
 
     # ------------------------------------------------------------ 页面
     @app.get("/", response_class=HTMLResponse)
-    async def index() -> HTMLResponse:
+    def index() -> HTMLResponse:
         return HTMLResponse(PAGE, headers={"Cache-Control": "no-store"})
 
     @app.get("/healthz")
-    async def healthz() -> Dict[str, Any]:
+    def healthz() -> Dict[str, Any]:
         return {"ok": True, "uptime": round(time.time() - state.started_at, 1)}
 
     # ------------------------------------------------------------ 状态
     @app.get("/api/status")
-    async def api_status() -> Dict[str, Any]:
+    def api_status() -> Dict[str, Any]:
         snap = state.snapshot()
         snap["ok"] = True
         snap["memory"] = _safe(lambda: _memory_stats(bot), {})
@@ -113,7 +167,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
 
     # ------------------------------------------------------------ 配置
     @app.get("/api/config")
-    async def api_config() -> Dict[str, Any]:
+    def api_config() -> Dict[str, Any]:
         return {
             "ok": True,
             "groups": schema.groups(),
@@ -122,7 +176,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         }
 
     @app.post("/api/config")
-    async def api_set(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def api_set(payload: Dict[str, Any]) -> Dict[str, Any]:
         path = str(payload.get("path") or "").strip()
         value = schema.coerce(path, payload.get("value"))
         with _WRITE_LOCK:
@@ -135,7 +189,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         return {"ok": True, "path": path, "value": cfg.get(path)}
 
     @app.post("/api/config/reset")
-    async def api_reset(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def api_reset(payload: Dict[str, Any]) -> Dict[str, Any]:
         path = str(payload.get("path") or "").strip()
         if path not in schema.BY_PATH:
             raise schema.FieldError(f"没有这个参数：{path}")
@@ -150,7 +204,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
 
     # ------------------------------------------------------------ 动作
     @app.post("/api/action/reindex")
-    async def api_reindex() -> Dict[str, Any]:
+    def api_reindex() -> Dict[str, Any]:
         from ..kb_store import KbStore
         from ..tools.kb import build_index
 
@@ -163,19 +217,19 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         return {"ok": True, "files": files, "chunks": chunks, **stats}
 
     @app.post("/api/action/snapshot")
-    async def api_snapshot() -> Dict[str, Any]:
+    def api_snapshot() -> Dict[str, Any]:
         if bot is None:
             return {"ok": False, "error": "机器人没在跑，没有记忆可落盘"}
         bot.store.snapshot()
         return {"ok": True, "memory": _memory_stats(bot)}
 
     @app.post("/api/action/clear-recent")
-    async def api_clear_recent() -> Dict[str, Any]:
+    def api_clear_recent() -> Dict[str, Any]:
         state.clear_recent()
         return {"ok": True}
 
     @app.post("/api/action/reset-all")
-    async def api_reset_all() -> Dict[str, Any]:
+    def api_reset_all() -> Dict[str, Any]:
         with _WRITE_LOCK:
             cfg.clear_all_overrides()
             _apply(bot)
@@ -187,7 +241,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
 
     # ------------------------------------------------------------ 人设（多角色）
     @app.get("/api/personas")
-    async def api_personas() -> Dict[str, Any]:
+    def api_personas() -> Dict[str, Any]:
         store = _personas(cfg, bot)
         info = store.describe()
         # 「绑了几个会话」的唯一事实来源是 chats.json，这里现算，不另存
@@ -202,7 +256,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         return {"ok": True, **info}
 
     @app.get("/api/persona")
-    async def api_persona(name: str = "") -> Dict[str, Any]:
+    def api_persona(name: str = "") -> Dict[str, Any]:
         store = _personas(cfg, bot)
         target = (name or "").strip() or store.default_name
         if not store.exists(target):
@@ -219,7 +273,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         }
 
     @app.post("/api/persona")
-    async def api_persona_save(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def api_persona_save(payload: Dict[str, Any]) -> Dict[str, Any]:
         store = _personas(cfg, bot)
         name = str(payload.get("name") or "").strip() or store.default_name
         store.save(name, str(payload.get("text") or ""))
@@ -229,13 +283,13 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         return {"ok": True, "name": name, "chars": len(store.text(name))}
 
     @app.post("/api/personas/new")
-    async def api_persona_new(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def api_persona_new(payload: Dict[str, Any]) -> Dict[str, Any]:
         store = _personas(cfg, bot)
         name = store.create(str(payload.get("name") or ""), str(payload.get("text") or ""))
         return {"ok": True, "name": name}
 
     @app.post("/api/personas/rename")
-    async def api_persona_rename(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def api_persona_rename(payload: Dict[str, Any]) -> Dict[str, Any]:
         store = _personas(cfg, bot)
         old = str(payload.get("from") or "")
         new = store.rename(old, str(payload.get("to") or ""))
@@ -252,7 +306,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         return {"ok": True, "name": new, "moved": moved}
 
     @app.post("/api/personas/delete")
-    async def api_persona_delete(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def api_persona_delete(payload: Dict[str, Any]) -> Dict[str, Any]:
         store = _personas(cfg, bot)
         name = str(payload.get("name") or "")
         store.delete(name)
@@ -270,7 +324,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         return {"ok": True, "cleared": cleared}
 
     @app.post("/api/personas/default")
-    async def api_persona_default(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def api_persona_default(payload: Dict[str, Any]) -> Dict[str, Any]:
         store = _personas(cfg, bot)
         name = store.set_default(str(payload.get("name") or ""))
         if bot is not None:
@@ -279,7 +333,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
 
     # ------------------------------------------------------------ 会话监视
     @app.get("/api/chats")
-    async def api_chats() -> Dict[str, Any]:
+    def api_chats() -> Dict[str, Any]:
         from ..chat_policies import MODE_HINT, MODE_LABEL, MODES, PEOPLE_LABEL, is_group
 
         store = _personas(cfg, bot)
@@ -352,7 +406,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         }
 
     @app.get("/api/chats/people")
-    async def api_chat_people(id: str = "", limit: int = 200) -> Dict[str, Any]:
+    def api_chat_people(id: str = "", limit: int = 200) -> Dict[str, Any]:
         """列这个会话里最近说过话的人，给面板的「只理/不理」名单用。"""
         from ..chat_policies import is_group
 
@@ -397,7 +451,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         return {"ok": True, "group": is_group(chat_id), "items": items[:60], **rule}
 
     @app.post("/api/chats")
-    async def api_chat_set(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def api_chat_set(payload: Dict[str, Any]) -> Dict[str, Any]:
         chat_id = str(payload.get("id") or "").strip()
         mode = payload.get("mode")
         persona = payload.get("persona")
@@ -425,13 +479,13 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         return {"ok": True, "chat": pref}
 
     @app.post("/api/chats/forget")
-    async def api_chat_forget(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def api_chat_forget(payload: Dict[str, Any]) -> Dict[str, Any]:
         _chats(cfg, bot).forget(str(payload.get("id") or ""))
         return {"ok": True}
 
     # ------------------------------------------------------------ 记忆
     @app.get("/api/memory")
-    async def api_memory(limit: int = 60, q: str = "", owner: str = "",
+    def api_memory(limit: int = 60, q: str = "", owner: str = "",
                          scope: str = "") -> Dict[str, Any]:
         if bot is None:
             return {"ok": True, "items": [], "hits": [], "stats": {}, "query": q,
@@ -480,7 +534,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         }
 
     @app.post("/api/memory/assign")
-    async def api_memory_assign(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def api_memory_assign(payload: Dict[str, Any]) -> Dict[str, Any]:
         if bot is None:
             return {"ok": False, "error": "机器人没在跑，改不了记忆库"}
         memory_id = str(payload.get("id") or "").strip()
@@ -508,7 +562,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
                 "owner": mem.owner, "owner_name": owner_name}
 
     @app.post("/api/memory/void")
-    async def api_memory_void(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def api_memory_void(payload: Dict[str, Any]) -> Dict[str, Any]:
         if bot is None:
             return {"ok": False, "error": "机器人没在跑，改不了记忆库"}
         memory_id = str(payload.get("id") or "").strip()
@@ -522,7 +576,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
 
     # ------------------------------------------------------------ 资料库
     @app.get("/api/kb")
-    async def api_kb() -> Dict[str, Any]:
+    def api_kb() -> Dict[str, Any]:
         store = _kb_store(cfg, bot)
         return {
             "ok": True,
@@ -533,7 +587,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
 
     # ------------------------------------------------------------ 工具
     @app.get("/api/tools")
-    async def api_tools() -> Dict[str, Any]:
+    def api_tools() -> Dict[str, Any]:
         from ..tools import TurnContext
         from ..tools import build as build_tools
 
@@ -570,7 +624,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
 
     # ------------------------------------------------------------ 语音试听
     @app.post("/api/voice/test")
-    async def api_voice_test(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def api_voice_test(payload: Dict[str, Any]) -> Dict[str, Any]:
         text = str(payload.get("text") or "").strip()
         if not text:
             raise schema.FieldError("先写一句要念的话")
@@ -591,7 +645,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         return {"ok": True, "file": path.name, "url": f"/api/voice/{path.name}"}
 
     @app.get("/api/voice/{name}")
-    async def api_voice_file(name: str) -> Any:
+    def api_voice_file(name: str) -> Any:
         from fastapi.responses import FileResponse
 
         safe = Path(name).name  # 挡掉 ../ 之类的路径穿越
@@ -602,13 +656,13 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
 
     # ------------------------------------------------------------ 关键用户 / 群记录
     @app.get("/api/people")
-    async def api_people() -> Dict[str, Any]:
+    def api_people() -> Dict[str, Any]:
         """谁被设成了什么等级。种子（config 里填的）也一并回，但标出来源。"""
         store = _people(cfg, bot)
         return {"ok": True, **store.describe(), "items": store.all()}
 
     @app.post("/api/people")
-    async def api_people_set(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def api_people_set(payload: Dict[str, Any]) -> Dict[str, Any]:
         store = _people(cfg, bot)
         try:
             item = store.set(
@@ -624,7 +678,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         return {"ok": True, "item": item}
 
     @app.post("/api/people/forget")
-    async def api_people_forget(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def api_people_forget(payload: Dict[str, Any]) -> Dict[str, Any]:
         """删掉某个 wxid 的等级记录，回落到种子/默认等级。
 
         找不到也返回成功：面板只关心「现在没了」，不关心「刚才到底有没有」。
@@ -636,7 +690,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         return {"ok": True, "removed": bool(ok)}
 
     @app.get("/api/group-log")
-    async def api_group_log(chat: str = "", sender: str = "",
+    def api_group_log(chat: str = "", sender: str = "",
                             limit: int = 100) -> Dict[str, Any]:
         """关键用户在群里说过的话。只读流水，不参与检索、不改判定。
 
@@ -649,7 +703,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
 
     # ------------------------------------------------------------ 系统信息
     @app.get("/api/system")
-    async def api_system() -> Dict[str, Any]:
+    def api_system() -> Dict[str, Any]:
         import platform
         import sys
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from pathlib import Path
@@ -336,6 +337,11 @@ class Bot:
             self.bridge.stop()
         if getattr(self, "glog", None) is not None:
             self.glog.close()
+        # 退出时把追加日志压一次：平时一条一行地写，跑久了行数会多于实际指纹，
+        # 这里收口成一份干净的文件，下次启动读得也快。
+        seen = getattr(self, "_seen", None)
+        if seen is not None:
+            seen.compact()
         self.store.snapshot()
 
     # ================================================================ 收
@@ -970,18 +976,44 @@ def _apply_log_level(level: str) -> None:
 
 
 class _Seen:
-    """处理过的消息指纹。持久化，重启后不会把老消息再回一遍。"""
+    """处理过的消息指纹。持久化，重启后不会把老消息再回一遍。
+
+    落盘用「一行一条」的追加，不是每次整体重写 JSON 数组。
+    原来每收到一条消息就把最多 5000 条指纹（约 200KB）重写一遍，而且写在
+    「消息还没开始处理」之前——群聊突发时等于自己堵自己。
+    追加一条只有几十字节，持久性没有降级：同样是写完才往下走。
+
+    兼容老文件：以 `[` 开头的按 JSON 数组读，读进来之后第一次写就转成新格式。
+    """
 
     def __init__(self, path: Path) -> None:
         self.path = path
         self._items: List[str] = []
         self._set: set = set()
         self._lock = threading.Lock()
+        self._legacy = False
         try:
             if path.exists():
-                data = json.loads(path.read_text(encoding="utf-8"))
-                self._items = [str(x) for x in data][-SEEN_CAP:]
-                self._set = set(self._items)
+                raw = path.read_text(encoding="utf-8")
+                items: List[str] = []
+                if raw.lstrip().startswith("["):
+                    items = [str(x) for x in json.loads(raw)]
+                    self._legacy = True
+                else:
+                    for line in raw.splitlines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            items.append(str(json.loads(line)))
+                        except json.JSONDecodeError:
+                            # 上次被杀在写入中间的半截行：跳过它，不整体报废
+                            logger.warning("seen.json 有一行读不出来，已跳过：%r", line[:40])
+                if len(items) > SEEN_CAP:
+                    items = items[-SEEN_CAP:]
+                    self._legacy = True      # 载入时截断过，下次写顺便压实
+                self._items = items
+                self._set = set(items)
         except Exception:
             self._items, self._set = [], set()
 
@@ -992,11 +1024,16 @@ class _Seen:
                 return False
             self._items.append(key)
             self._set.add(key)
-            if len(self._items) > SEEN_CAP:
+            over = len(self._items) > SEEN_CAP
+            if over:
                 drop = self._items[: len(self._items) - SEEN_CAP]
                 self._items = self._items[-SEEN_CAP:]
                 self._set -= set(drop)
-            self._save()
+            if self._legacy or over:
+                # 老格式要整体转一次、超容量要压一次，都是低频事件
+                self._compact()
+            else:
+                self._append(key)
             return True
 
     def discard(self, key: str) -> None:
@@ -1014,15 +1051,36 @@ class _Seen:
                 self._items.remove(key)
             except ValueError:
                 pass
-            self._save()
+            # 追加格式没法「删除一行」，这里整体重写。失败是低频路径，代价可接受。
+            self._compact()
 
-    def _save(self) -> None:
+    def compact(self) -> None:
+        """压成一份干净的文件。退出前调一次，免得追加日志一路长下去。"""
+        with self._lock:
+            self._compact()
+
+    def _append(self, key: str) -> None:
         try:
-            self.path.write_text(json.dumps(self._items), encoding="utf-8")
-        except Exception as exc:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8") as fp:
+                fp.write(json.dumps(key, ensure_ascii=False) + "\n")
+        except OSError as exc:
             # 不再静默：写不进去意味着重启后可能把老消息再答一遍，
             # 这属于要能从日志里查出来的降级，不是可以 pass 掉的小事。
             logger.warning("seen.json 写不进去（重启后可能重复回复）：%s", exc)
+
+    def _compact(self) -> None:
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(
+                "".join(json.dumps(k, ensure_ascii=False) + "\n" for k in self._items),
+                encoding="utf-8",
+            )
+            os.replace(tmp, self.path)
+            self._legacy = False
+        except OSError as exc:
+            logger.warning("seen.json 压实失败（旧文件仍可读）：%s", exc)
 
 
 def _msg_key(msg: Dict[str, Any], text: str) -> str:
