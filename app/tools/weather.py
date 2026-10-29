@@ -98,7 +98,7 @@ def make_tool(cfg) -> Tool:
             return "（要给个城市名）"
         try:
             code = _city_code(city, timeout)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.info("查城市编码失败：%s", exc)
             code = None
         if not code:
@@ -109,13 +109,13 @@ def make_tool(cfg) -> Tool:
             now_text = _realtime(code, timeout)
             if now_text:
                 blocks.append(now_text)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.info("实时天气失败：%s", exc)
         try:
             forecast = _forecast(code, timeout)
             if forecast:
                 blocks.append("未来几天：\n" + forecast)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.info("天气预报失败：%s", exc)
 
         return "\n".join(blocks) if blocks else "（天气数据没取到）"

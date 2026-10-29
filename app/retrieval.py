@@ -75,7 +75,7 @@ class MemoryRetriever:
         try:
             return self._search(query, int(top_k or self.top_k), mark_used,
                                 owner, scope, chat_id, min_score)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("检索失败，按没检索到处理：%s", exc)
             return []
 
@@ -122,7 +122,6 @@ class MemoryRetriever:
             sim = max(sim, cosine(qvec, mem.alias_vector))
 
         # 专名、数字这类字面命中，向量常常捞不准（「老张」和「约了谁」不相似）
-        if len(query) >= 2:
-            if query in mem.text or (mem.alias_text and query in mem.alias_text):
-                sim = max(sim, LITERAL_BOOST)
+        if len(query) >= 2 and (query in mem.text or (mem.alias_text and query in mem.alias_text)):
+            sim = max(sim, LITERAL_BOOST)
         return sim

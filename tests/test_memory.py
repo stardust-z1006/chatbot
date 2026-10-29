@@ -25,10 +25,10 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.embeddings import Embedder  # noqa: E402
-from app.memory import MemoryStore  # noqa: E402
-from app.retrieval import MemoryRetriever  # noqa: E402
-from _support import FAILS, check, line  # noqa: E402
+from app.embeddings import Embedder
+from app.memory import MemoryStore
+from app.retrieval import MemoryRetriever
+from _support import FAILS, check, line
 
 SEED = [
     "我喜欢喝美式咖啡，不加糖",
@@ -77,7 +77,8 @@ def _run(work: Path) -> int:
 
     embedder = Embedder()
     # 假裁判：本地恒定判「同一件事」。真裁判要联网，回归不能依赖它。
-    judge = lambda new, old: True  # noqa: E731
+    def judge(new: str, old: str) -> bool:
+        return True
     store = MemoryStore(work, embedder=embedder, capacity=10,
                         judge=judge, snapshot_every=1000)
     retriever = MemoryRetriever(store, embedder=embedder, min_score=0.55)
@@ -120,7 +121,30 @@ def _run(work: Path) -> int:
     check("有效条数被压到容量内", stats["active"] <= 10, str(stats))
     check("确实发生了淘汰", stats["dropped"] > 0, str(stats))
 
-    line("6. 重启后还在吗")
+    line("7. touch 攒着写：不逐条刷盘，flush 后一次落盘且能回放")
+    store.flush_touches()                      # 清空缓冲区，让下面拿到的基线干净
+    log_size = store.log_path.stat().st_size
+    touched = retriever.search("咖啡", top_k=2, mark_used=True)
+    check("检索命中了至少一条", bool(touched), f"{len(touched)} 条")
+    check("touch 还没落盘（只在缓冲区里）",
+          store.log_path.stat().st_size == log_size,
+          f"{store.log_path.stat().st_size} vs {log_size}")
+    wrote = store.flush_touches()
+    check("flush 一次把攒下的全写下去", wrote == len(touched),
+          f"写了 {wrote} 条 / 命中 {len(touched)} 条")
+    check("落盘后日志确实变长了", store.log_path.stat().st_size > log_size)
+
+    line("8. 作废记录不会无限长（上限 3 条）")
+    small = MemoryStore(work / "void", embedder=embedder, capacity=50,
+                        judge=lambda a, b: True, void_keep=3, snapshot_every=1000)
+    for i in range(6):
+        small.put(f"我住在第{i}个城市")        # 每次都被判「同一件事」-> 不断作废旧条
+    check("作废记录攒了一堆", small.stats()["void"] >= 4, str(small.stats()))
+    small.snapshot()
+    check("★ 快照后只留最近 3 条作废记录", small.stats()["void"] == 3, str(small.stats()))
+    check("有效记录没被连带清掉", small.stats()["active"] >= 1, str(small.stats()))
+
+    line("9. 重启后还在吗")
     store.snapshot()
     reloaded = MemoryStore(work, embedder=embedder, capacity=10)
     check("重载后有效条数一致", reloaded.stats()["active"] == stats["active"],
@@ -130,6 +154,9 @@ def _run(work: Path) -> int:
     again = MemoryRetriever(reloaded, embedder=embedder).search("咖啡", top_k=2)
     check("重启后「咖啡」仍能命中", bool(again),
           "、".join(h.brief() for h in again) or "空")
+    check("重启后使用次数回放正确",
+          any(m.use_count > 0 for m in reloaded.active()),
+          f"{sum(1 for m in reloaded.active() if m.use_count)} 条有使用记录")
 
     print()
     if FAILS:

@@ -16,12 +16,12 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.bot import _Seen  # noqa: E402
-from app.context_budget import ContextBudget  # noqa: E402
-from app.memory import Memory  # noqa: E402
-from app.retrieval import Hit  # noqa: E402
-from app.wechat.reply_split import clean_for_wechat, split_reply  # noqa: E402
-from _support import line  # noqa: E402
+from app.bot import _Seen
+from app.context_budget import ContextBudget
+from app.memory import Memory
+from app.retrieval import Hit
+from app.wechat.reply_split import clean_for_wechat, split_reply
+from _support import line
 
 
 def fake_hit(index: int, score: float, text: str) -> Hit:

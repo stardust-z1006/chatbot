@@ -212,7 +212,7 @@ class StateLogHandler(logging.Handler):
             self.state.log_record(
                 record.levelname, record.name, record.getMessage()
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             self.handleError(record)
 
 

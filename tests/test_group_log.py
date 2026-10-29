@@ -28,11 +28,13 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.chat_policies import ChatPrefs  # noqa: E402
-from app.panel.state import MonitorState  # noqa: E402
-from app.group_log import MSG_FIELDS, TEXT_CAP, GroupLog  # noqa: E402
-from app.user_levels import LEVELS, UserLevelStore  # noqa: E402
-from _support import FAILS, check, line  # noqa: E402
+from app.chat_locks import ChatLocks
+from app.sender import Sender
+from app.chat_policies import ChatPrefs
+from app.panel.state import MonitorState
+from app.group_log import MSG_FIELDS, TEXT_CAP, GroupLog
+from app.user_levels import LEVELS, UserLevelStore
+from _support import FAILS, check, line
 
 GROUP = "12345678@chatroom"
 PRIVATE = "wxid_friend1"
@@ -380,7 +382,8 @@ def _make_bot(cfg, people, glog, chats):
     bot._turns = {}
     bot._pending = {}
     bot._timers = {}
-    bot._locks = {}
+    bot.chat_locks = ChatLocks()
+    bot.sender = Sender(bot.cfg, lambda: None)   # 没有接入层：语音/发送都直接返回
     bot._last_sent = {}
     bot._lock = threading.Lock()
     bot._seen = bot_mod._Seen(Path(glog.dir) / "seen.json")

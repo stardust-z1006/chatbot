@@ -31,6 +31,15 @@ SAME_ABOVE = 0.96
 
 ACTIVE, VOID, DROPPED = "active", "void", "dropped"
 
+# 作废记录（改口留下的旧说法）只留最近这么多条。
+# 留档的意义是「最近的改口能回溯」，半年前那句说法没人查；不封顶的话，
+# 每一次改口、每一次面板指派都留一条（还带 512 维向量），
+# 快照和内存会单调增长，而 capacity 只管 active，统计上看不出来。
+VOID_KEEP = 200
+
+# touch 缓存的条数上限。攒够就写一次，别一条一次 fsync。
+TOUCH_BUFFER = 64
+
 
 @dataclass
 class Memory:
@@ -77,6 +86,7 @@ class MemoryStore:
         judge: Optional[Callable[[str, str], bool]] = None,
         snapshot_every: int = 100,
         group_quota: int = 80,
+        void_keep: int = VOID_KEEP,
     ) -> None:
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -89,9 +99,13 @@ class MemoryStore:
         self.group_quota = max(0, int(group_quota))
         self.judge = judge
         self.snapshot_every = max(10, int(snapshot_every))
+        self.void_keep = max(0, int(void_keep))
 
         self._items: Dict[str, Memory] = {}
         self._appends = 0
+        # 待落盘的 touch 行。检索命中时不该每条都 fsync（一次回复最多命中 6 条，
+        # 就是 6 次 open+write+fsync），攒起来由 flush_touches() 一次性写。
+        self._touch_buf: List[str] = []
         # 所有会话的 Timer 线程和面板线程都会碰这个库，而「读一遍全部记忆」
         # 和「写一条」同时发生就是 dictionary changed size during iteration。
         # 一把可重入锁足够：读写都很快（400 条），没有争抢的价值。
@@ -110,7 +124,7 @@ class MemoryStore:
                 for item in raw.get("records", []):
                     mem = Memory(**item)
                     self._items[mem.id] = mem
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning("快照损坏，按空库启动：%s", exc)
 
         if self.log_path.exists():
@@ -121,7 +135,7 @@ class MemoryStore:
                         continue
                     try:
                         op = json.loads(line)
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         broken += 1
                         continue
                     # 两种行：整条记录（add/update/void/drop）和精简的 touch。
@@ -129,7 +143,7 @@ class MemoryStore:
                     if "mem" in op:
                         try:
                             mem = Memory(**op["mem"])
-                        except Exception:  # noqa: BLE001
+                        except Exception:
                             broken += 1
                             continue
                         self._items[mem.id] = mem
@@ -523,14 +537,40 @@ class MemoryStore:
         一条记忆带 512 维向量（序列化后约 11KB），一次检索最多命中 6 条，
         按整条追加就是 6 次 11KB 的 fsync —— 磁盘瓶颈是自己造出来的。
         回放时靠 id 找回已载入的那条，见 load()。
+
+        这里只是**放进缓冲区**：真正的写盘在 flush_touches()。代价是进程被强杀
+        时可能丢最近几十条 touch —— 它们只影响淘汰排序的先后，不影响记忆本身，
+        属于可以接受的降级（记忆的增删改仍然是每次 fsync 的）。
         """
-        line = json.dumps(
+        self._touch_buf.append(json.dumps(
             {"op": "touch", "id": mem.id,
              "use_count": mem.use_count, "last_used_at": mem.last_used_at},
             ensure_ascii=False,
-        )
-        self._write_line(line)
-        self._appends += 1
+        ))
+        if len(self._touch_buf) >= TOUCH_BUFFER:
+            self.flush_touches()
+
+    def flush_touches(self) -> int:
+        """把缓冲的 touch 行一次性写下去，返回写了几条。
+
+        正常调用点是「一轮回复结束」（Bot.handle 末尾）和快照/退出之前。
+        写失败只记日志不抛：丢的是「这条被用过」的计数，不该让回复流程挂掉。
+        """
+        with self._lock:
+            if not self._touch_buf:
+                return 0
+            lines, self._touch_buf = self._touch_buf, []
+            try:
+                with self.log_path.open("a", encoding="utf-8") as fp:
+                    for line in lines:
+                        fp.write(line + "\n")
+                    fp.flush()
+                    os.fsync(fp.fileno())
+            except OSError as exc:
+                logger.warning("touch 落盘失败，丢了 %d 条使用记录：%s", len(lines), exc)
+                return 0
+            self._appends += len(lines)
+            return len(lines)
 
     def _write_line(self, line: str) -> None:
         """追加一行并 fsync，两种日志行共用同一套落盘语义。"""
@@ -545,16 +585,34 @@ class MemoryStore:
         整个动作必须在锁里做完：快照内容和「日志截断」如果被一次并发写入
         插在中间，那一行就会跟着旧日志一起消失。
         """
+        # 先把缓冲的 touch 落下去：日志马上要被截断，没写的那几条会跟着一起没了。
+        self.flush_touches()
         with self._lock:
-            alive = [m.as_dict() for m in self._items.values() if m.status != DROPPED]
+            keep_void = self._recent_void_ids()
+            kept = {
+                mem_id: mem for mem_id, mem in self._items.items()
+                if mem.status != DROPPED
+                and (mem.status != VOID or mem_id in keep_void)
+            }
+            dropped_void = len(self._items) - len(kept)
+            alive = [m.as_dict() for m in kept.values()]
             payload = {"version": 1, "saved_at": time.time(), "records": alive}
             tmp = self.snap_path.with_suffix(".tmp")
             tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
             os.replace(tmp, self.snap_path)
             self.log_path.write_text("", encoding="utf-8")
-            self._items = {m.id: m for m in self._items.values() if m.status != DROPPED}
+            self._items = kept
             self._appends = 0
-            logger.info("快照完成：%d 条", len(self._items))
+            logger.info("快照完成：%d 条%s", len(self._items),
+                        f"（另有 {dropped_void} 条久远作废记录不再留档）" if dropped_void else "")
+
+    def _recent_void_ids(self) -> set:
+        """要保留的作废记录 id：按创建时间取最近的 `void_keep` 条。"""
+        void = [m for m in self._items.values() if m.status == VOID]
+        if len(void) <= self.void_keep:
+            return {m.id for m in void}
+        newest = sorted(void, key=lambda m: m.created_at, reverse=True)[: self.void_keep]
+        return {m.id for m in newest}
 
 
 def _text_overlap(a: str, b: str) -> float:

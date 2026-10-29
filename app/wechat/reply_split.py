@@ -45,7 +45,7 @@ def split_reply(text: str, max_chars: int = 40, max_bubbles: int = 3) -> List[st
 
     # 条数超了就把它并回最后一条，宁可长一点也不刷屏
     if len(bubbles) > max_bubbles:
-        bubbles = bubbles[: max_bubbles - 1] + ["".join(bubbles[max_bubbles - 1:])]
+        bubbles = [*bubbles[: max_bubbles - 1], "".join(bubbles[max_bubbles - 1:])]
 
     return [b for b in bubbles if b][:max_bubbles]
 

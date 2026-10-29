@@ -31,10 +31,10 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app import settings as settings_mod  # noqa: E402
-from app.bot import Bot  # noqa: E402
-from app.llm import Reply  # noqa: E402
-from _support import FAILS, check, line  # noqa: E402
+from app import settings as settings_mod
+from app.bot import Bot
+from app.llm import Reply
+from _support import FAILS, check, line
 
 GROUP = "1234@chatroom"
 GROUP2 = "5678@chatroom"
@@ -254,6 +254,12 @@ def _case_group_owner(bot: Bot, bridge: FakeBridge) -> None:
     check("记录写进去了（主人不 @ 也留痕）", ok)
     check("主人不 @ 也能接话（连续性窗口 40+30=70 >= 45）", sent_ok,
           f"多发 {len(bridge.sent) - before_sent} 条")
+
+    # 回复那一行是 `_send` **之后**才写的（见 Bot._flush_body：先发、再记 reply）。
+    # 只等 bridge.sent 会在「回复行还没落」时就返回，而下一个用例是拿 glog 长度
+    # 当基线的——基线取早了，这一行随后落进来，就变成「陌生人那条多记了一条」的
+    # 假失败（2026-10-29 实测：加进 run_all 后连跑 3 轮挂了 2 轮，修完连跑 3 轮全绿）。
+    wait_for(lambda: any(r.get("op") == "reply" for r in bot.glog.read(limit=200)), 3)
 
 
 def _case_stranger(bot: Bot, bridge: FakeBridge) -> None:
@@ -542,7 +548,7 @@ def _case_concurrency(bot: Bot) -> None:
         try:
             json.loads(raw_line)
             parsed += 1
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
     check("每一行都是完整 JSON（没有写串）", parsed == 100, str(parsed))
 
@@ -588,7 +594,7 @@ def _case_bad_env(root: Path) -> None:
     try:
         bot = Bot(cfg)
         started = True
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         started = False
         check("坏环境也要能起来（不该抛异常）", False, f"{type(exc).__name__}: {exc}")
         return
@@ -607,7 +613,7 @@ def _case_bad_env(root: Path) -> None:
             "raw": {"local_id": 999},
         })
         time.sleep(0.3)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raised = f"{type(exc).__name__}: {exc}"
     check("记录不可用时收消息也不崩", raised == "", raised)
     bot.stop()
@@ -640,7 +646,7 @@ def _case_stop(bot: Bot) -> None:
     raised = ""
     try:
         bot.stop()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raised = f"{type(exc).__name__}: {exc}"
     check("stop() 不抛异常", raised == "", raised)
     check("running 已置 False", bot.state.running is False)

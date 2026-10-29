@@ -73,7 +73,7 @@ class TTS:
 
         try:
             asyncio.run(self._run(spoken, out))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("语音合成失败：%s", exc)
             return None
 

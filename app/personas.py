@@ -61,7 +61,7 @@ class PersonaStore:
             return
         try:
             raw = json.loads(self.state_path.read_text(encoding="utf-8"))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("personas.json 坏了，按空配置启动：%s", exc)
             return
         if isinstance(raw, dict):

@@ -231,7 +231,7 @@ class Bridge:
                 self._note_read_fail("拿不到聊天输入框控件")
                 return None
             return uia._read_edit_value(ctrl)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self._note_read_fail(f"读输入框抛异常：{exc}")
             return None
 
@@ -253,7 +253,7 @@ class Bridge:
         """
         try:
             return gui._send_watermark(who)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("拍发送水位失败（这层证据本次不用）：%s", exc)
             return None
 
@@ -276,7 +276,7 @@ class Bridge:
                 try:
                     if checker(text, who, mode="exact", after=mark):
                         return True
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     logger.debug("回读落库失败（按没发出去处理）：%s", exc)
                     return False
                 if attempt + 1 < LANDED_TRIES:
@@ -288,7 +288,7 @@ class Bridge:
             return False
         try:
             return bool(waiter(text, who, mark))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("回读落库失败（按没发出去处理）：%s", exc)
             return False
 
@@ -393,7 +393,7 @@ class Bridge:
             nick = self.db.get_nickname(username)
             if nick and nick != username:
                 return nick
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         return username
 
@@ -410,13 +410,13 @@ class Bridge:
             for hit in self.db.search_contact(name):
                 if name in (hit.get("nick_name"), hit.get("remark")):
                     return hit["username"]
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         try:
             for user, nick in (self.db.nickname_map() or {}).items():
                 if nick == name:
                     return user
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         return None
 
@@ -426,7 +426,7 @@ class Bridge:
     def sessions(self, limit: int = 30) -> List[Dict[str, Any]]:
         try:
             return self.db.get_sessions(limit=limit)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("读取会话列表失败：%s", exc)
             return []
 
@@ -467,7 +467,7 @@ class Bridge:
         if self._listener is not None:
             try:
                 self._listener.stop()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
             self._listener = None
 
@@ -498,7 +498,7 @@ class Bridge:
         """
         try:
             self._wechat()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise RuntimeError(f"微信界面通道建不起来：{exc}") from exc
 
     def window_state(self) -> Dict[str, Any]:
@@ -532,7 +532,7 @@ class Bridge:
                 state=("minimized" if (iconic or offscreen)
                        else ("hidden" if not visible else "normal")),
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             out["error"] = str(exc)
         return out
 
@@ -544,7 +544,7 @@ class Bridge:
         """
         try:
             state = self.window_state()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("看窗口状态失败，照常发：%s", exc)
             return
         if state.get("state") in ("normal", "hidden", "unknown"):
@@ -563,12 +563,12 @@ class Bridge:
                 time.sleep(0.5)
             if self.window_state().get("state") == "normal":
                 return
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("静默还原失败，改走置前：%s", exc)
         try:
             gui.bring_to_front()
             time.sleep(0.6)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("还原微信窗口失败，仍尝试发送：%s", exc)
 
     # ------------------------------------------------------------ 发送
@@ -611,7 +611,7 @@ class Bridge:
                 logger.debug("已发送 → %s（%.1fs）：%r", target,
                              time.time() - started, text[:30])
             return ok
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("发送异常 → %s：%s", target, exc)
             return False
 
@@ -626,7 +626,7 @@ class Bridge:
             if not ok:
                 logger.warning("发文件失败 → %s：%s", target, result)
             return ok
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("发文件异常 → %s：%s", target, exc)
             return False
 
@@ -668,7 +668,7 @@ class Bridge:
                          detail + f"（原来是 {before.get('state')}，已自动还原）")
                 else:
                     step("微信主窗口", True, detail)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             step("微信主窗口", False, f"检查失败：{exc}")
 
         # 2. UIA / OCR 通道
@@ -676,7 +676,7 @@ class Bridge:
             from wechatauto.guia import ScreenOCR
 
             step("OCR 备用通道", ScreenOCR.available(), "可用")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             step("OCR 备用通道", False, f"不可用：{exc}")
 
         # 3. 真发一条
@@ -690,6 +690,6 @@ class Bridge:
     def recent_messages(self, chat_id: str, limit: int = 20) -> List[Dict[str, Any]]:
         try:
             return self.db.get_messages(chat_id, limit=limit)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("读历史失败（%s）：%s", chat_id, exc)
             return []

@@ -63,7 +63,7 @@ class DedupJudge:
                 max_retries=0,
             )
             return self._client
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("裁判客户端初始化失败：%s", exc)
             self._broken = True
             return None
@@ -88,7 +88,7 @@ class DedupJudge:
                 max_tokens=256,
             )
             answer = (resp.choices[0].message.content or "").strip().lower()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # 只有「钥匙不对/没权限」才永久停用；超时、限流这类是一时的，
             # 下次该继续问——不然一次网络抖动就把查重裁判永久关掉了，
             # 灰区记忆从此每条都存成两条，越攒越脏。

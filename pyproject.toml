@@ -1,0 +1,35 @@
+# 工程配置（只放工具配置，本项目不作为可安装的包分发）
+#
+# 为什么现在才加：之前没有任何配置，粗检查按默认 88 列跑出 555 条告警，
+# 其中 465 条是 `Dict`→`dict` 这类风格项——真正的问题（未定义名、异常吞掉、
+# 日志拿不到栈）全被埋在里面。现在只挑「能指向真实缺陷」的规则，
+# 行宽按实际代码的 100 列定，让 `ruff check` 变成可以当门禁用的东西。
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["vendor", ".venv", "data"]
+
+[tool.ruff.lint]
+# E/F 是地基（语法、未定义名、未用导入）；B 抓常见坑；SIM/LOG/PIE 抓写错的意图；
+# RUF 里有几条针对 noqa 失效的检查（noqa 写了但规则没开，等于自我安慰）。
+select = ["E", "F", "B", "SIM", "LOG", "PIE", "RUF"]
+
+ignore = [
+    # try/except/pass 换成 contextlib.suppress 并不总是更好：
+    # 本项目多数是「读不到就算了，但要留一行日志」，显式写出来更清楚。
+    "SIM105",
+    # 中文注释与日志按显示宽度算，不按字符数卡。
+    "E501",
+    # 中文全角标点在中文串/注释里是**故意的**，不是手滑打错。
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+# 没开 BLE001（裸 except）：这套代码有 90 多处「兜底 except Exception → 降级 + 记日志」，
+# 是刻意的设计而不是疏漏。逐个加 noqa 只会制造噪音，真要收紧应该是把具体的
+# 几个改成 narrow except，而不是在配置里关掉再逐行注释。
+[tool.ruff.lint.per-file-ignores]
+# 测试脚本要在 import 前改 sys.path，E402 在这里是必须的。
+"tests/*.py" = ["E402"]

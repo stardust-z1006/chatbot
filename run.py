@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app import settings  # noqa: E402
+from app import settings  # noqa: E402  （sys.path 先补好，import 必须在后面）
 from app.logging_setup import setup as setup_log  # noqa: E402
 
 LOCK_PORT = 47653
@@ -172,7 +172,7 @@ def cmd_doctor(cfg) -> int:
             stat_kb = kb.stats()
             tail = "（空库，放资料到 knowledge/ 后跑 run.py index）" if stat_kb["docs"] == 0 else ""
             print(f"  [通过] 资料库：{stat_kb['docs']} 篇 / {stat_kb['chunks']} 块{tail}")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"  [跳过] 资料库打不开（kb_search 不挂）：{exc}")
 
     # 工具清单。复用刚加载的向量模型，别再加载一遍
@@ -188,7 +188,7 @@ def cmd_doctor(cfg) -> int:
         print(f"  [通过] 工具 {len(names)} 个：{', '.join(names)}")
         if "chat_history" not in names:
             print("         聊天记录工具没挂（命令行模式没有微信接入层，正式跑才有）")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         ok = False
         print(f"  [失败] 工具组装：{exc}")
 
@@ -200,7 +200,7 @@ def cmd_doctor(cfg) -> int:
         bridge = Bridge(cfg)
         info = bridge.self_info()
         print(f"  [通过] 微信账号：{info.get('nickname')}（{info.get('username')}）")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         ok = False
         print(f"  [失败] 微信读不到：{exc}")
 
@@ -217,7 +217,7 @@ def cmd_doctor(cfg) -> int:
                       f"否则回复生成了也发不出去")
             else:
                 print(f"  [通过] 微信窗口：{label}")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"  [跳过] 窗口状态读不到：{exc}")
 
     print()

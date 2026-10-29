@@ -56,17 +56,17 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.panel import schema  # noqa: E402
-from app.settings import Settings  # noqa: E402
-from app.wechat.bridge import (  # noqa: E402
+from app.panel import schema
+from app.settings import Settings
+from app.wechat.bridge import (
     DEFAULT_DEDUPE_SECONDS,
     LANDED_GAP,
     LANDED_TRIES,
     Bridge,
     _norm_text,
 )
-from app.wechat.reply_split import split_reply  # noqa: E402
-from _support import FAILS, check, line, total  # noqa: E402
+from app.wechat.reply_split import split_reply
+from _support import FAILS, check, line, total
 
 LOGGER_NAME = "app.wechat.bridge"
 _CTRL = object()   # 假装是 UIA 的输入框控件
@@ -363,7 +363,7 @@ class Capture(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             self.records.append((record.levelno, record.getMessage()))
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     def hit(self, needle: str, level: Optional[int] = None) -> int:
@@ -416,7 +416,7 @@ def _guia_params(func: str) -> Optional[List[str]]:
         if spec is None or not spec.origin:
             return None
         src = (Path(spec.origin).parent / "guia.py").read_text(encoding="utf-8")
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
     hit = re.search(rf"def\s+{func}\s*\(([^)]*)\)", src, re.S)
     if not hit:

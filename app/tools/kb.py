@@ -55,14 +55,14 @@ def _read_pdf(path: Path) -> str:
         return ""
     try:
         reader = PdfReader(str(path))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("PDF 解析失败 %s：%s", path.name, exc)
         return ""
     pages = []
     for page in reader.pages[:200]:
         try:
             pages.append(page.extract_text() or "")
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
     return "\n".join(pages)
 

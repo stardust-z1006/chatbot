@@ -157,7 +157,7 @@ class Settings:
             self.override_path.parent.mkdir(parents=True, exist_ok=True)
             self.override_path.write_text(text, encoding="utf-8")
             self.save_error = ""
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # 内存里已经改了，磁盘上没改 —— 重启就会回到旧值。
             # 这种事必须让调用方（面板）知道，否则用户以为改成功了。
             self.save_error = f"{type(exc).__name__}: {exc}"
@@ -250,7 +250,7 @@ def _read_yaml(path: Path) -> Dict[str, Any]:
 
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         return data if isinstance(data, dict) else {}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"[warn] {path.name} 解析失败，忽略：{exc}")
         return {}
 

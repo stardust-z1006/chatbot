@@ -284,7 +284,7 @@ def describe(cfg: Any) -> List[Dict[str, Any]]:
     for spec in FIELDS:
         try:
             current = cfg.get(spec.path)
-        except Exception:  # noqa: BLE001
+        except Exception:
             current = None
         out.append(
             spec.as_dict(

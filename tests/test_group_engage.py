@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.group_engage import (  # noqa: E402
+from app.group_engage import (
     GroupEngager,
     MemberCache,
     TalkState,
@@ -30,8 +30,8 @@ from app.group_engage import (  # noqa: E402
     norm,
     strip_mentions,
 )
-from app.user_levels import UserLevelStore  # noqa: E402
-from _support import FAILS, check, line  # noqa: E402
+from app.user_levels import UserLevelStore
+from _support import FAILS, check, line
 
 GROUP = "12345678@chatroom"
 SELF = "wxid_self"
@@ -315,6 +315,20 @@ def _part_judge(work: Path) -> None:
                      self_wxid=SELF, persona_names=[], now=10)
     check("★ 陌生人开窗后 40+30=70 仍不主动接（999）", (not v.hit) and v.score == 70,
           v.brief())
+
+    # 12c 只按昵称配置的主人：judge 内部判等级时不能丢掉 sender_name。
+    #     漏传昵称时 level_of(sender) 只看 wxid，这个人会被判成 stranger ->
+    #     主动接话直接失效（Bot._judge 那边带昵称、判出来是 owner，两处口径不一致），
+    #     Verdict.level 也会记错，流水和面板统计跟着错。
+    nick_id = "wxid_laozhang"
+    people_nick = UserLevelStore(work / "people_nick.json", owners=["老张"])
+    eng_nick, _, talk_nick = _engager(work / "nick", provider=_provider(), people=people_nick)
+    talk_nick.open(GROUP, nick_id, now=0)
+    v = eng_nick.judge(chat_id=GROUP, sender=nick_id, sender_name="老张",
+                       text="今天去哪吃", is_group=True, self_names=self_names,
+                       self_wxid=SELF, persona_names=[], now=10)
+    check("★ 只按昵称配置的主人仍能主动接话（等级判定要带昵称）",
+          v.hit and v.level == "owner" and v.score == 70, v.brief())
 
     # 13 窗口过期（注入 now 超 90s）
     talk2 = TalkState()

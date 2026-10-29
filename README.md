@@ -31,6 +31,8 @@ bot02/
 │   ├── retrieval.py     检索（相似度 0.7 + 重要度 0.3）
 │   ├── context_budget.py    闸门：唯一能往上下文塞东西的地方
 │   ├── llm.py           模型调用（重试 / 空回复放大 / 工具调用）
+│   ├── sender.py        发送层：切分 / 冷却 / 重试 / 语音
+│   ├── chat_locks.py    按会话发锁（引用计数，归零才淘汰）
 │   ├── chat_policies.py 按会话的监听策略
 │   ├── user_levels.py   用户等级（owner / friend / stranger / blocked）
 │   ├── group_engage.py  群聊接话打分
@@ -39,8 +41,8 @@ bot02/
 │   ├── kb_store.py      资料库 SQLite（FTS5 + bm25）
 │   ├── tools/           模型可调用的工具（web / weather / kb / history / registry）
 │   ├── voice/           语音合成
-│   └── panel/           后台面板（state / schema / server / page）
-├── tests/               九个回归脚本 + run_all.py
+│   └── panel/           后台面板（state / schema / server / page + static/index.html）
+├── tests/               十个回归脚本 + run_all.py
 ├── prompts/personas/    人设（一个角色一个 md，文件名即角色名）
 ├── knowledge/           给机器人查的资料（md / txt / pdf / docx）
 ├── docs/                项目文档（不参与索引）
@@ -100,7 +102,7 @@ start.bat
 
 ## 测试
 
-九个回归脚本，互相独立，全部跑完约 45 秒。改核心代码后跑一遍：
+十个回归脚本，互相独立，全部跑完约 50 秒。改核心代码后跑一遍：
 
 ```bat
 .venv\Scripts\python.exe tests\run_all.py
@@ -112,6 +114,7 @@ start.bat
 | `test_context_budget.py` | 闸门预算回砍、回复切分、重复消息 |
 | `test_memory.py` | 记忆写入、检索门槛、查重合并、容量淘汰 |
 | `test_identity_isolation.py` | 别人的记忆一条都捞不到 |
+| `test_concurrency.py` | 并发：同会话串行 / 跨会话并行 / 指纹恰好一次 |
 | `test_tool_loop.py` | 工具循环：正常 / 预算截断 / 轮次用尽 / 坏输入 |
 | `test_group_engage.py` | 群聊接话打分：被叫到就回、不插嘴 |
 | `test_group_log.py` | 关键用户群消息记录（只追加流水） |

@@ -61,7 +61,11 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
 
     @app.exception_handler(Exception)
     async def _on_any(_: Request, exc: Exception) -> JSONResponse:
-        logger.warning("后台接口出错：%s", exc, exc_info=True)
+        # 用 `exc_info=exc` 而不是 `exc_info=True`：这是一个异常处理器，**不在**
+        # except 块里，`exc_info=True` 取到的是 `sys.exc_info()`——全是 None，
+        # 日志里只会留一行「NoneType: None」，最需要栈的时候恰恰没有栈。
+        # 传异常实例时 logging 会自己用它组出 (type, value, tb)。
+        logger.warning("后台接口出错：%s", exc, exc_info=exc)
         return JSONResponse({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=500)
 
     # ------------------------------------------------------------ 页面
@@ -287,7 +291,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         if bot is not None and getattr(bot, "bridge", None) is not None:
             try:
                 rows = bot.bridge.sessions(limit=60)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning("面板读会话列表失败：%s", exc)
                 rows = []
             for row in rows or []:
@@ -366,14 +370,14 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         rows = []
         try:
             rows = bot.bridge.recent_messages(chat_id, limit=max(20, min(limit, 500))) or []
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("读会话成员失败：%s", exc)
 
         counts: Dict[str, Dict[str, Any]] = {}
         self_wxid = ""
         try:
             self_wxid = bot.bridge.self_wxid or ""
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         for row in rows:
             sender = str(row.get("sender_username") or "")
@@ -387,7 +391,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         for sender, item in counts.items():
             try:
                 item["name"] = bot.bridge.display_name(sender) or sender
-            except Exception:  # noqa: BLE001
+            except Exception:
                 item["name"] = sender
         items = sorted(counts.values(), key=lambda x: (-x["count"], -x["last"]))
         return {"ok": True, "group": is_group(chat_id), "items": items[:60], **rule}
@@ -400,10 +404,9 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
         name = str(payload.get("name") or "")
         people_mode = payload.get("people_mode")
         people = payload.get("people")
-        if persona:
-            # 绑角色前先确认这个角色真的存在，别写进去一个空指针
-            if not _personas(cfg, bot).exists(str(persona)):
-                raise schema.FieldError(f"没有叫「{persona}」的角色")
+        # 绑角色前先确认这个角色真的存在，别写进去一个空指针
+        if persona and not _personas(cfg, bot).exists(str(persona)):
+            raise schema.FieldError(f"没有叫「{persona}」的角色")
         if people is not None and not isinstance(people, (list, tuple)):
             raise schema.FieldError("名单要是数组")
         try:
@@ -544,7 +547,7 @@ def create_app(cfg: Any, bot: Any = None, state: Any = None) -> FastAPI:
                 kb=getattr(bot, "kb", None),
             )
             specs = registry.specs()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("面板列工具失败：%s", exc)
             specs = []
         snapshot = state.snapshot().get("tools") or {}
@@ -815,7 +818,7 @@ def _owner_name(owner: str, people: Any = None, bot: Any = None) -> str:
         if people is not None:
             try:
                 alias = str(people.alias_of(key) or "").strip()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 alias = ""
         if alias:
             return alias
@@ -825,7 +828,7 @@ def _owner_name(owner: str, people: Any = None, bot: Any = None) -> str:
         if bridge is not None:
             try:
                 name = str(bridge.display_name(key) or "").strip()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 name = ""
             # display_name 查不到昵称时会把 id 原样返回，那种情况别当成名字用
             if name and name != key:
@@ -866,7 +869,7 @@ def _version_of(dist: str) -> str:
     for name in (dist, dist.replace("-", "_"), dist.replace("_", "-")):
         try:
             return metadata.version(name)
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
     return "未安装"
 
@@ -877,14 +880,14 @@ def _apply(bot: Any) -> None:
         return
     try:
         bot.apply_config()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("参数改了但热应用失败（重启后生效）：%s", exc)
 
 
 def _safe(fn: Any, default: Any) -> Any:
     try:
         return fn()
-    except Exception:  # noqa: BLE001
+    except Exception:
         return default
 
 
@@ -934,7 +937,7 @@ def start_in_thread(app: FastAPI, host: str = "127.0.0.1",
     logger.error("后台面板没起来（%s:%s 可能被占用），机器人照常跑", host, port)
     try:
         server.should_exit = True
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return None
 
@@ -944,5 +947,5 @@ def stop(server: Any) -> None:
         return
     try:
         server.should_exit = True
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass

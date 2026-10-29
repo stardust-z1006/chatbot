@@ -268,7 +268,7 @@ class GroupLog:
                 continue
             try:
                 item = json.loads(raw.decode("utf-8"))
-            except Exception:  # noqa: BLE001
+            except Exception:
                 continue        # 坏一行跳过，不影响其他行
             if isinstance(item, dict):
                 records.append(item)

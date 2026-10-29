@@ -92,7 +92,7 @@ class LLM:
                 timeout=self.timeout,
                 max_retries=0,  # 重试自己管，才能控制「放大预算」这一步
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise LLMError(f"客户端初始化失败：{exc}") from exc
         return self._client
 
@@ -138,7 +138,7 @@ class LLM:
                 raise LLMError("模型返回空内容")
             except LLMError:
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 last_exc = exc
                 if attempt < self.retries:
                     time.sleep(1.5 * (attempt + 1))

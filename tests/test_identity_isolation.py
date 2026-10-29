@@ -24,12 +24,12 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.bot import Bot  # noqa: E402
-from app.embeddings import Embedder  # noqa: E402
-from app.memory import MemoryStore  # noqa: E402
-from app.user_levels import UserLevelStore  # noqa: E402
-from app.retrieval import MemoryRetriever  # noqa: E402
-from _support import FAILS, check, line  # noqa: E402
+from app.bot import Bot
+from app.embeddings import Embedder
+from app.memory import MemoryStore
+from app.user_levels import UserLevelStore
+from app.retrieval import MemoryRetriever
+from _support import FAILS, check, line
 
 A = "u:wxid_aaa"
 B = "u:wxid_bbb"

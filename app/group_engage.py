@@ -320,7 +320,7 @@ class MemberCache:
         try:
             raw = self.provider(key)
             members = list(raw) if raw else []
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # 失败也要缓存（记住这次失败），否则每条消息都重试一次读库。
             logger.warning("读群成员失败（%s），排除法本轮不启用：%s", key, exc)
         self._cache[key] = (now, members)
@@ -367,7 +367,7 @@ def _cfg_get(cfg: Any, path: str, default: Any) -> Any:
     if callable(get):
         try:
             return get(path, default)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return default
     node: Any = cfg
     for part in path.split("."):
@@ -420,7 +420,13 @@ class GroupEngager:
         persona_names: Sequence[str],
         now: Optional[float] = None,
     ) -> Verdict:
-        level = self.people.level_of(sender) if self.people is not None else "stranger"
+        # 昵称必须一起传：`UserLevelStore.level_of` 的兜底顺序是
+        # 「显式记录 > owner/key_users 名单（wxid 或昵称）> default」，
+        # 只给 wxid 的话，`people.owners` 里按昵称填的人会在这里被判成 stranger——
+        # 而 `Bot._judge` 判 blocked 时是带昵称的，两处口径不一致，
+        # 表现为「配置了主人，群里却永远不主动接话」，Verdict.level 也跟着记错。
+        level = (self.people.level_of(sender, sender_name)
+                 if self.people is not None else "stranger")
         if level == "blocked":
             return Verdict(False, 0, level, ["blocked"])
         if not is_group:
@@ -437,7 +443,7 @@ class GroupEngager:
         if self.people is not None and self_wxid:
             own_alias = self.people.alias_of(self_wxid)
             if own_alias:
-                candidates = _dedup_names(candidates + [own_alias])
+                candidates = _dedup_names([*candidates, own_alias])
         cand_lower = {c.lower() for c in candidates}
 
         # 1. @ 两段式（D2）：精确命中 +100；未命中但名字不在成员表 +60；

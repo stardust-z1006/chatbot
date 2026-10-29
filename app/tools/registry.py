@@ -68,7 +68,7 @@ class Registry:
         except TypeError as exc:
             logger.warning("工具 %s 参数不匹配：%s", name, exc)
             return f"（工具参数不对：{exc}）"
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("工具 %s 执行失败：%s", name, exc, exc_info=True)
             return f"（工具执行失败：{exc}）"
 

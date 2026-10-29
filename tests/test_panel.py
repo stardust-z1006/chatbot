@@ -18,24 +18,24 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import requests  # noqa: E402
+import requests
 
-from app.bot import Bot  # noqa: E402
-from app.panel import server as monitor  # noqa: E402
-from app.memory import MemoryStore  # noqa: E402
-from app.panel.state import (  # noqa: E402
+from app.bot import Bot
+from app.panel import server as monitor
+from app.memory import MemoryStore
+from app.panel.state import (
     MonitorState,
     attach_log_handler,
     detach_log_handler,
 )
-from app.settings import load  # noqa: E402
-from _support import FAILS, check  # noqa: E402
+from app.settings import load
+from _support import FAILS, check
 
 PORT = 8799
 BASE = f"http://127.0.0.1:{PORT}"
@@ -250,7 +250,7 @@ def main() -> int:
         check("角色改名", code == 200 and data["name"] == "演示角色2", str(data))
         check("改名会跟着改会话绑定",
               data.get("moved") == 1 and
-              [x for x in get("/api/chats")["items"] if x["id"] == test_chat][0]["persona"]
+              next(x for x in get("/api/chats")["items"] if x["id"] == test_chat)["persona"]
               == "演示角色2")
         post("/api/personas/rename", {"from": "演示角色2", "to": "演示角色"})
 
@@ -456,7 +456,7 @@ def main() -> int:
         try:
             if getattr(bot, "kb", None) is not None:
                 bot.kb.close()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         shutil.rmtree(work, ignore_errors=True)
 

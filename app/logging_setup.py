@@ -42,7 +42,7 @@ def unregister_extra(handler: logging.Handler) -> None:
         _EXTRA.remove(handler)
     try:
         logging.getLogger().removeHandler(handler)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 

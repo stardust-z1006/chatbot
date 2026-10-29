@@ -65,7 +65,7 @@ class ChatPrefs:
             return
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("chats.json 坏了，按默认策略启动：%s", exc)
             return
         items = raw.get("chats") if isinstance(raw, dict) else None

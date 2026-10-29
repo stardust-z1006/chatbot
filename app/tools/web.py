@@ -121,7 +121,7 @@ def search(query: str, count: int = 6, timeout: float = 12.0) -> List[Dict[str, 
     for label, fn in (("rss", _bing_rss), ("html", _bing_html)):
         try:
             items = fn(query, count, timeout)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("Bing %s 失败（%s）：%s", label, query[:40], exc)
             continue
         if items:
@@ -138,7 +138,7 @@ def fetch_text(url: str, max_chars: int = 3000, timeout: float = 12.0) -> str:
         return ""
     try:
         resp = requests.get(url, headers=_headers(), timeout=timeout, allow_redirects=True)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.info("抓取失败 %s：%s", url[:80], exc)
         return ""
     if resp.status_code >= 400:
@@ -160,7 +160,7 @@ def fetch_text(url: str, max_chars: int = 3000, timeout: float = 12.0) -> str:
 def _domain(url: str) -> str:
     try:
         return urllib.parse.urlparse(url).netloc
-    except Exception:  # noqa: BLE001
+    except Exception:
         return ""
 
 

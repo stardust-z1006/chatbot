@@ -86,7 +86,7 @@ class UserLevelStore:
             return
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # 坏了就按空库启动：等级读不出来只是「多回了几句」，不该让机器人起不来
             self.load_error = str(exc)
             logger.warning("people.json 坏了，按默认等级启动：%s", exc)

@@ -22,12 +22,12 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.bot import Bot  # noqa: E402
-from app.panel.state import MonitorState  # noqa: E402
-from app.llm import Reply  # noqa: E402
-from app.settings import Settings  # noqa: E402
-from app.tools.registry import Registry, Tool  # noqa: E402
-from _support import FAILS, check  # noqa: E402
+from app.bot import Bot
+from app.panel.state import MonitorState
+from app.llm import Reply
+from app.settings import Settings
+from app.tools.registry import Registry, Tool
+from _support import FAILS, check
 
 
 

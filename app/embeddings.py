@@ -54,7 +54,7 @@ class Embedder:
             self._model = TextEmbedding(**kwargs)
             logger.info("向量模型就绪：%s", self.model_name)
             return self._model
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # 一次失败就永久降级：让它走关键词兜底，总比每条消息都卡在下载上强
             self._broken = True
             logger.warning("向量模型不可用，退关键词检索：%s", exc)
@@ -73,7 +73,7 @@ class Embedder:
         try:
             for vec in model.embed(items):
                 out.append(_normalize([float(x) for x in vec]))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("向量编码失败：%s", exc)
             return [None] * len(items)
         return out

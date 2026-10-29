@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .chat_locks import ChatLocks
 from .embeddings import Embedder
 from .group_engage import GroupEngager, MemberCache, TalkState, strip_mentions
 from .context_budget import ContextBudget
@@ -29,13 +30,14 @@ from .memory import MemoryStore
 from .user_levels import UserLevelStore, is_key_level
 from .personas import PersonaStore
 from .retrieval import MemoryRetriever
+from .sender import Sender
 from .message_tagging import NOISE_PATTERNS, classify, clip_for_store, worth_remembering
 from .panel.state import MonitorState
 from .tools import TurnContext
 from .tools import build as build_tools
 from .tools.history import HistoryReader
 from .voice.tts import TTS
-from .wechat.reply_split import clean_for_wechat, split_reply
+from .wechat.reply_split import clean_for_wechat
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +80,7 @@ class Bot:
                 key_users=list(cfg.get("group.key_users") or []),
                 default=str(cfg.get("people.default_level", "stranger")),
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("用户等级读不到，所有人按陌生人处理：%s", exc)
         try:
             self.glog = GroupLog(
@@ -87,7 +89,7 @@ class Bot:
                 enabled=bool(cfg.get("group.log_enabled", True)),
             )
             self.glog.prune()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("群消息记录不可用，这次不记：%s", exc)
 
         # 启动时各留一行，运维一眼就能看出「等级读到几条」「记录在哪、留几天」。
@@ -129,6 +131,8 @@ class Bot:
         self.llm: Any = None
         self.tts: Optional[TTS] = None
         self.apply_config()
+        # 发送层：切分/冷却/重试/语音。tts 用 getter 取，面板热改重建后自动跟上。
+        self.sender = Sender(cfg, lambda: self.bridge, lambda: self.tts)
 
         # 三样「可有可无」的能力。设计前提是：任何一项初始化失败都只是少一个工具，
         # 聊天本身照常——联网挂了还能聊天，是这套东西能不能长期跑的关键。
@@ -143,8 +147,9 @@ class Bot:
         # 否则拆分之后每个说话人该用谁的名字回复就无从得知。
         self._pending: Dict[tuple, Dict[str, Any]] = {}
         self._timers: Dict[tuple, threading.Timer] = {}
-        self._locks: Dict[str, threading.Lock] = {}
-        self._last_sent: Dict[str, float] = {}
+        # 会话锁：引用计数 + 归零才淘汰，见 chat_locks.py 开头那段「为什么不用
+        # dict + 清空未持有的」——那写法有个能静默破坏串行保证的窗口。
+        self.chat_locks = ChatLocks()
         self._lock = threading.Lock()
         self.me = ""
         self._seen = _Seen(Path(cfg.data_dir) / "seen.json")
@@ -263,7 +268,7 @@ class Bot:
             return None
         try:
             return KbStore(Path(cfg.data_dir) / "kb.sqlite3")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("资料库打不开，kb_search 这轮不挂：%s", exc)
             return None
 
@@ -274,7 +279,7 @@ class Bot:
             return None
         try:
             return HistoryReader(bridge.db, bridge.self_wxid)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("聊天记录读不到，chat_history 不挂：%s", exc)
             return None
 
@@ -291,7 +296,7 @@ class Bot:
                 pitch=str(cfg.get("voice.pitch", "+0Hz")),
                 max_chars=int(cfg.get("voice.tts_max_chars", 220)),
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("语音合成不可用，本轮只发文字：%s", exc)
             return None
 
@@ -304,7 +309,7 @@ class Bot:
         # 二是面板从一开始就能看到「微信窗口是不是被最小化了」（最小化会发不出）
         try:
             self._bridge_window()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("微信界面通道没建起来（发消息时会再试一次）：%s", exc)
         self.state.running = True
         self.state.account = self.me
@@ -428,28 +433,6 @@ class Bot:
             return sum(len(slot["items"]) for (cid, _), slot in self._pending.items()
                        if cid == chat_id)
 
-    def _chat_lock(self, chat_id: str) -> threading.Lock:
-        """拿这个会话专属的锁。同会话串行、不同会话并行。
-
-        合并窗口只挡得住「连着发来好几条」，挡不住「上一条还在跑工具循环，
-        这一条已经到点了」：那种情况下会同时有两个 Timer 线程跑同一个会话，
-        把 `_turns` 交错、把回复顺序打乱、甚至对同一条消息答两次。
-        所以锁必须覆盖 handle + 发送的整个周期。
-
-        锁对象按会话缓存，超过 512 个只清「当前没被持有」的，避免长期跑
-        一个群一个锁地涨上去。
-        """
-        with self._lock:
-            lock = self._locks.get(chat_id)
-            if lock is None:
-                lock = threading.Lock()
-                self._locks[chat_id] = lock
-                if len(self._locks) > 512:
-                    for key in [k for k, v in self._locks.items()
-                                if k != chat_id and not v.locked()]:
-                        self._locks.pop(key, None)
-            return lock
-
     def _flush(self, pkey: tuple) -> None:
         chat_id = pkey[0]
         with self._lock:
@@ -464,7 +447,7 @@ class Bot:
         query = "\n".join(text for _, text in items)
         # 锁仍按会话：串行边界是「这个群一条一条回」，不是「这个人一条一条回」。
         # 按人加锁的话，A、B 同时到点会并发跑同一群的 handle，回复顺序就乱了。
-        with self._chat_lock(chat_id):
+        with self.chat_locks.hold(chat_id):
             self._flush_body(chat_id, name, query, keys, msg)
 
     def _flush_body(self, chat_id: str, name: str, query: str,
@@ -476,7 +459,7 @@ class Bot:
                 sender=str(msg.get("sender") or ""),
                 sender_name=str(msg.get("sender_name") or ""),
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("处理消息失败：%s", exc, exc_info=True)
             self.state.error()
             # 撤销指纹，否则这条消息永远算「处理过」：一句话就这么没了
@@ -489,7 +472,7 @@ class Bot:
         if sent and is_group(chat_id):
             self.talk.open(chat_id, str(msg.get("sender") or ""))
         # 文字先落地，再补语音。反过来万一语音卡住，对方会先看到一段空白
-        self._send_voice(chat_id, result.get("voice") or [])
+        self.sender.send_voice(chat_id, result.get("voice") or [])
         # 回复也留一行，和 msg 行靠 msg_keys 关联（不回写 msg 行，见 grouplog）
         self._record_key_reply(chat_id, msg, result["reply"], sent, keys)
         # 埋点放在最后：面板要看到的是「这一条真的走完了」的耗时
@@ -638,7 +621,7 @@ class Bot:
             try:
                 self.store.put(clip_for_store(user_text), owner=owner,
                                scope=scope, chat_id=group_chat)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning("写记忆失败，继续回复：%s", exc)
         elif mem_ok:
             logger.debug("不值得存，跳过：%s", user_text[:20])
@@ -685,7 +668,7 @@ class Bot:
             logger.error("模型调用失败：%s", exc)
             self.state.error()
             reply, meta = "我这会儿有点卡，等下再说？", {"tools": [], "rounds": 0}
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("模型调用异常：%s", exc, exc_info=True)
             self.state.error()
             reply, meta = "我这会儿有点卡，等下再说？", {"tools": [], "rounds": 0}
@@ -700,6 +683,9 @@ class Bot:
         if self.tts is not None and self.cfg.get("voice.mode", "tool") == "always":
             voice = [reply]
 
+        # 这一轮用过的记忆（mark_used）攒在缓冲区里，回复这条路径走完再统一落盘：
+        # 搜索一次最多命中 6 条，逐条 fsync 就是 6 次刷盘，而这一轮已经结束了。
+        self.store.flush_touches()
         return {
             "reply": reply,
             "elapsed": time.time() - started,
@@ -804,92 +790,10 @@ class Bot:
 
     # ================================================================ 发
     def _send(self, chat_id: str, reply: str) -> bool:
-        """切分发送。返回是否**每条**气泡都送达（没接入层算 True，命令行不发送）。"""
-        if self.bridge is None:
-            return True
-        reply = reply or ""
-        if bool(self.cfg.get("wechat.split_reply", True)):
-            bubbles = split_reply(
-                reply,
-                max_chars=int(self.cfg.get("wechat.bubble_chars", 40)),
-                max_bubbles=int(self.cfg.get("wechat.max_bubbles", 3)),
-            )
-        else:
-            # 关掉切分就整段一次发（会显得不像人，但有人就想要这个）
-            bubbles = [reply.strip()] if reply.strip() else []
-        per_char = float(self.cfg.get("wechat.typing_per_char", 0.035))
-        all_ok = True
-        for index, bubble in enumerate(bubbles):
-            if index:
-                time.sleep(min(2.5, per_char * len(bubble) + 0.4))
-            if not self._send_one(chat_id, bubble):
-                all_ok = False
-                # 完整原文进日志，别只留前 40 字：要能照着补发
-                logger.error("未送达（已重试 2 次，放弃）：%r -> %s", bubble, chat_id)
-        # 「我们这层发了几条、成没成」必须留痕：库内部重发时这一行是唯一的对照物
-        logger.info("发送完成：%d 条气泡 → %s（%s）", len(bubbles), chat_id,
-                    "全部送达" if all_ok else "有未送达")
-        return all_ok
-
-    def _send_one(self, chat_id: str, bubble: str) -> bool:
-        """发一条气泡，失败按 2s / 5s 各重试一次。
-
-        发送是整套方案最脆的一环（要驱动微信界面），一次 UIA 抖动就丢一句话。
-        实现方案承诺的就是「重试两次后留档放弃」。重试会占住当前会话的锁，
-        所以次数不能多——宁可留档让人补，也不能把会话线程堵死。
+        """切分发送。真正的活在 `sender.py`，这里留一层是为了保留可替换的接缝：
+        测试与面板都通过 `bot._send` 换掉整个发送层，不去碰切分/重试的细节。
         """
-        for attempt, delay in enumerate((0.0, 2.0, 5.0)):
-            if delay:
-                time.sleep(delay)
-            self._respect_cooldown(chat_id)
-            if self.bridge.send_text(chat_id, bubble):
-                logger.debug("气泡已发出（第 %d 次尝试）：%r -> %s",
-                             attempt + 1, bubble[:30], chat_id)
-                if attempt:
-                    logger.info("第 %d 次重试，发出去了：%s", attempt, bubble[:30])
-                return True
-            logger.warning("发送失败（第 %d 次）：%r -> %s",
-                           attempt + 1, bubble[:40], chat_id)
-        return False
-
-    def _respect_cooldown(self, chat_id: str) -> None:
-        """两条消息之间至少隔 cooldown 秒。
-
-        合并窗口只管「连着发来好几条」，管不住「刚回完又有人 @」——
-        没有这条限制时，短时间内连发会让微信界面抢焦点，看着像刷屏。
-        """
-        cooldown = max(0.0, float(self.cfg.get("wechat.cooldown", 0) or 0))
-        if cooldown <= 0:
-            return
-        wait = cooldown - (time.time() - self._last_sent.get(chat_id, 0.0))
-        if wait > 0:
-            time.sleep(min(wait, cooldown))
-        self._last_sent[chat_id] = time.time()
-        # 长期跑下来这个 dict 会一个会话一条地长；超过阈值就只留最近一小时的
-        if len(self._last_sent) > 512:
-            cutoff = time.time() - 3600
-            self._last_sent = {
-                key: value for key, value in self._last_sent.items() if value >= cutoff
-            }
-
-    def _send_voice(self, chat_id: str, texts: List[str]) -> None:
-        """把排队的语音发出去。
-
-        微信 4.x 发不了语音气泡，这里发的是 mp3 文件——对方点开就能听，内容一样。
-        合成失败或发送失败都只记日志，不重试、不打扰对方：文字回复已经发出去了。
-        """
-        if not texts or self.bridge is None or self.tts is None:
-            return
-        limit = max(1, int(self.cfg.get("voice.max_per_turn", 1)))
-        for text in texts[:limit]:
-            path = self.tts.synth(text)
-            if path is None:
-                logger.warning("语音合成失败，这条不发了：%s", text[:24])
-                continue
-            if self.bridge.send_file(chat_id, str(path)):
-                logger.info("已发语音：%s", path.name)
-            else:
-                logger.error("语音没发出去：%s -> %s", path.name, chat_id)
+        return self.sender.send(chat_id, reply)
 
     # ================================================================ 指令
     def _command(self, chat_id: str, text: str) -> Optional[str]:
@@ -936,7 +840,7 @@ class Bot:
         if members is not None and bridge is not None:
             try:
                 names += members.self_names(chat_id, bridge.self_wxid)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 # 读成员表失败只少几个别名，不影响「账号昵称/手动别名」这两路
                 pass
         return names
@@ -1068,7 +972,7 @@ class _Seen:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 self._items = [str(x) for x in data][-SEEN_CAP:]
                 self._set = set(self._items)
-        except Exception:  # noqa: BLE001
+        except Exception:
             self._items, self._set = [], set()
 
     def add(self, key: str) -> bool:
@@ -1105,7 +1009,7 @@ class _Seen:
     def _save(self) -> None:
         try:
             self.path.write_text(json.dumps(self._items), encoding="utf-8")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # 不再静默：写不进去意味着重启后可能把老消息再答一遍，
             # 这属于要能从日志里查出来的降级，不是可以 pass 掉的小事。
             logger.warning("seen.json 写不进去（重启后可能重复回复）：%s", exc)

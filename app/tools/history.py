@@ -24,7 +24,7 @@ def _readable(text: Any) -> str:
     raw = str(text or "").strip()
     if not raw:
         return ""
-    if raw.startswith("<?xml") or raw.startswith("<msg") or "<appmsg" in raw:
+    if raw.startswith(("<?xml", "<msg")) or "<appmsg" in raw:
         match = re.search(r"<title>(.*?)</title>", raw, re.S)
         title = (match.group(1).strip() if match else "")
         return "[卡片] " + title if title else "[卡片消息]"
@@ -56,7 +56,7 @@ class HistoryReader:
             return self._nicks[wxid]
         try:
             name = self.db.get_nickname(wxid) or wxid
-        except Exception:  # noqa: BLE001
+        except Exception:
             name = wxid
         self._nicks[wxid] = name
         return name
@@ -73,13 +73,13 @@ class HistoryReader:
             for hit in self.db.search_contact(name):
                 if name in (hit.get("nick_name"), hit.get("remark")):
                     return hit["username"]
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         try:
             for user, nick in (self.db.nickname_map() or {}).items():
                 if nick == name:
                     return user
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         return None
 
@@ -91,7 +91,7 @@ class HistoryReader:
         while len(out) < cap:
             try:
                 rows = self.db.get_messages(username, limit=PAGE, offset=offset)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning("读聊天记录失败（%s）：%s", username, exc)
                 break
             if not rows:
@@ -150,7 +150,7 @@ def make_tool(reader: HistoryReader, cfg, current_chat: str = "") -> Tool:
             return "（全库搜索必须给关键词）"
         try:
             sessions = reader.db.get_sessions(limit=20)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return f"（取会话列表失败：{exc}）"
 
         kw = query.strip().lower()
