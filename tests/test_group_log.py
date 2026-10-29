@@ -316,8 +316,13 @@ def _wiring_cases(bot, glog, chats, people) -> None:
     check("纯表情不记", send("wxid_boss", "👍👍👍", local_id=7) == 0)
     check("撤回提示不记",
           send("wxid_boss", "老板撤回了一条消息", local_id=8) == 0)
-    check("非文本类型不记",
-          send("wxid_boss", "语音内容", msg_type="voice", local_id=9) == 0)
+    # 占位（图片/表情）不是「他说了什么」，不该进流水。
+    # 注意别拿 voice 当反例：微信开了「语音自动转文字」时，voice 的正文就是
+    # 真实说的话，那种要记——见下面那条。
+    check("占位（图片）不记",
+          send("wxid_boss", "[图片·看不到内容]", msg_type="image", local_id=9) == 0)
+    check("语音有转写就照记（那是真说的话）",
+          send("wxid_boss", "晚上七点我在楼下等你", msg_type="voice", local_id=13) == 1)
 
     # 关键：判定为「不回」也要留痕（记录在 @ 判定之前）
     before_pending = bot._pending_count(GROUP)

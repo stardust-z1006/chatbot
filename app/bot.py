@@ -31,6 +31,7 @@ from .user_levels import UserLevelStore, is_key_level
 from .personas import PersonaStore
 from .retrieval import MemoryRetriever
 from .sender import Sender
+from .message_content import IGNORED_TYPES, is_placeholder
 from .message_tagging import NOISE_PATTERNS, classify, clip_for_store, worth_remembering
 from .panel.state import MonitorState
 from .tools import TurnContext
@@ -41,10 +42,6 @@ from .wechat.reply_split import clean_for_wechat
 
 logger = logging.getLogger(__name__)
 
-# 能进模型的类型。`_TYPE_MAP` 只会产出 text/image/voice/video/emoji/link/call/system，
-# 再加一个兜底的 unknown；quote / file 是早期设计残留（那时文件与引用还没并进 link），
-# 没有任何生产者，留着只会让人误以为这两类被处理过。
-TEXT_TYPES = {"text", "link", "unknown"}
 # 按等级裁轮数：主人上下文更长（更熟），陌生人只留最近几轮。
 # 值是「轮数」，_trim_turns 里乘 2 才是条数（一问一答两条）。
 LEVEL_TURNS = {"owner": 16, "friend": 12, "stranger": 8}
@@ -345,8 +342,13 @@ class Bot:
     def on_message(self, msg: Dict[str, Any]) -> None:
         if msg.get("is_self"):
             return
-        if (msg.get("type") or "") not in TEXT_TYPES:
-            logger.debug("忽略非文本消息（%s）", msg.get("type"))
+        # 只有「不是对话内容」的类型才丢：系统提示（入群/撤回/拍一拍）和通话记录
+        # 是事件不是话。图片、语音、表情、位置一律当消息处理——它们的正文在
+        # 接入层已经变成 `[图片·看不到内容]` 这类占位标记（见 message_content），
+        # 模型据此知道对方发了什么、能顺着问一句；静默丢掉才是真正的体验硬伤。
+        kind = msg.get("type") or ""
+        if kind in IGNORED_TYPES:
+            logger.debug("忽略非对话消息（%s）", msg.get("type_raw") or kind)
             return
         text = str(msg.get("content") or "").strip()
         if not text:
@@ -515,6 +517,11 @@ class Bot:
         glog = getattr(self, "glog", None)
         people = getattr(self, "people", None)
         if glog is None or people is None or not is_group(chat_id):
+            return
+        # 占位（图片/语音/表情）不是「他说了什么」，记进流水只会把关键用户的话
+        # 淹掉，而且这些标记对「他喜欢什么」的判断没有任何信息量。
+        # 两种来源都认：接入层打的标记，和正文本身长得就像占位（测试/回放走这条）。
+        if msg.get("placeholder") or is_placeholder(text):
             return
         sender = str(msg.get("sender") or "")
         if not sender:

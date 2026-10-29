@@ -16,6 +16,8 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from ..message_content import render
+
 logger = logging.getLogger(__name__)
 
 _booted = False
@@ -43,9 +45,11 @@ _TYPE_MAP = {
     "语音": "voice",
     "视频": "video",
     "动画表情": "emoji",
+    "位置": "location",
     "文件/链接/卡片": "link",
     "音视频通话": "call",
     "系统消息": "system",
+    "红包": "redpacket",
 }
 
 
@@ -474,15 +478,21 @@ class Bridge:
         if not sender and msg.get("sender_id") == 2:
             is_self = True
         raw_type = str(msg.get("type") or "")
+        # 原始 content 在这里就折干净：type=49 是一整段 appmsg XML，
+        # 图片/语音没有文字。下游（模型、群记录、记忆库）拿到的是人话，
+        # 不必各自再折一次，也就不会有人漏折。
+        kind = _TYPE_MAP.get(raw_type, raw_type.lower() or "unknown")
+        content, placeholder = render(kind, str(msg.get("content") or ""))
         return {
             "chat_id": username,
             "chat_name": self.display_name(username) or username,
             "sender": sender,
             "sender_name": self.display_name(sender) if sender else "",
             "is_self": is_self,
-            "type": _TYPE_MAP.get(raw_type, raw_type.lower() or "unknown"),
+            "type": kind,
             "type_raw": raw_type,
-            "content": str(msg.get("content") or ""),
+            "content": content,
+            "placeholder": placeholder,
             "time": int(msg.get("create_time") or 0),
             "raw": msg,
         }

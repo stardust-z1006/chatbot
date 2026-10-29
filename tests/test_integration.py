@@ -190,6 +190,7 @@ def _run(work: Path) -> int:
     _case_silent(bot, bridge)
     _case_off(bot, bridge)
     _case_private(bot, bridge)
+    _case_non_text(bot, bridge)
     _case_dup(bot, bridge)
     _case_merge(bot, cfg, bridge)
     _case_hot_log(bot, cfg, bridge)
@@ -347,6 +348,31 @@ def _case_private(bot: Bot, bridge: FakeBridge) -> None:
     check("私聊照常回", ok)
     check("私聊不进群记录（避免和记忆库重复）",
           len(bot.glog.read(limit=200)) == before)
+
+
+def _case_non_text(bot: Bot, bridge: FakeBridge) -> None:
+    """非文本消息以前被静默丢弃：对方发图问「这怎么办」，机器人一声不吭。"""
+    line("6b. 图片不再静默丢弃，系统消息仍然丢")
+
+    # 私聊恒回，最适合验「有没有被丢掉」。以前 image 不在白名单里，这条一条回复都没有。
+    before_sent = len(bridge.sent)
+    feed(bot, BOSS, BOSS, "[图片·看不到内容]", name="老板", msg_type="image")
+    check("私聊发图片会回（以前静默丢弃）",
+          wait_for(lambda: len(bridge.sent) > before_sent),
+          f"多发 {len(bridge.sent) - before_sent} 条")
+
+    # 群里：占位不是「他说了什么」，不写群记录（否则关键用户的真话会被淹）
+    before_rows = len(bot.glog.read(chat_id=GROUP, limit=200))
+    feed(bot, GROUP, BOSS, "[图片·看不到内容]", name="老板", msg_type="image")
+    check("图片占位不进群记录",
+          len(bot.glog.read(chat_id=GROUP, limit=200)) == before_rows,
+          f"{len(bot.glog.read(chat_id=GROUP, limit=200))} vs {before_rows}")
+
+    before_sent = len(bridge.sent)
+    feed(bot, BOSS, BOSS, "xxx 撤回了一条消息", name="老板", msg_type="system")
+    check("系统消息不回（事件不是对话）",
+          not wait_for(lambda: len(bridge.sent) > before_sent, timeout=0.8),
+          f"多发 {len(bridge.sent) - before_sent} 条")
 
 
 def _case_dup(bot: Bot, bridge: FakeBridge) -> None:

@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass
 from typing import Tuple
 
+from .message_content import is_placeholder
+
 # 类型 -> 初始重要度（主文档：待办与指令最高、偏好与事实次之、闲聊最低）
 IMPORTANCE: dict[str, int] = {
     "待办": 5,
@@ -136,6 +138,10 @@ def worth_remembering(text: str) -> bool:
     """
     t = (text or "").strip()
     if len(t) < MIN_CHARS:
+        return False
+    # 占位标记（[图片·看不到内容] 之类）不是用户说的话，记下来只会让以后的检索
+    # 命中一堆「他发过图片」，把真事实挤掉。
+    if is_placeholder(t):
         return False
     if any(p in t for p in NOISE_PATTERNS):
         return False

@@ -4,7 +4,7 @@
     .venv\\Scripts\\python.exe tests\\run_all.py          # 全跑
     .venv\\Scripts\\python.exe tests\\run_all.py memory   # 只跑名字含 memory 的
 
-十个脚本互相独立、各自起临时目录，任何两个之间没有顺序依赖，
+十一个脚本互相独立、各自起临时目录，任何两个之间没有顺序依赖，
 所以这里按「由便宜到贵」排：先跑几秒能出结果的，挂得早也好早发现。
 每个子进程单独跑，一个脚本崩了不影响其余的，最后汇总一张表。
 
@@ -26,6 +26,7 @@ SUITES = [
     ("test_context_budget.py", "闸门预算回砍、回复切分、重复消息"),
     ("test_memory.py", "记忆写入、检索门槛、查重合并、容量淘汰"),
     ("test_identity_isolation.py", "别人的记忆一条都捞不到"),
+    ("test_message_content.py", "XML 折叠 / 非文本占位：不再污染上下文、不再静默丢弃"),
     ("test_concurrency.py", "并发：同会话串行 / 跨会话并行 / 指纹恰好一次"),
     ("test_tool_loop.py", "工具循环：正常 / 预算截断 / 轮次用尽 / 坏输入"),
     ("test_group_engage.py", "群聊接话打分：被叫到就回、不插嘴"),
